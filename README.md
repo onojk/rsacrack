@@ -1,71 +1,33 @@
-rsacrack/
-├── README.md
-├── LICENSE
-├── requirements.txt
-├── coil_model.py
-├── prime_overlay.py
-├── factor_test.py
-├── diagrams/
-│   └── .gitkeep
-├── whitepaper/
-│   └── rsacrack_whitepaper.pdf
-└── .gitignore
-
-📄 README.md
-
-# RSAcrack
+RSAcrack
 
 RSAcrack: Exploring a conical spring (coil) model of numbers and primes to visualize overlaps, factorization, and potential cryptographic implications.
 
-## Overview
-This project models numbers along a conical coil, with primes forming a tangent coil that intersects at prime positions.  
-Composite numbers inherit structure from prime overlaps beneath their location.  
-The goal is to study whether these geometric relationships reveal shortcuts to **prime factorization**.
+📖 Overview
 
-## Features
-- 3D coil model of natural numbers
-- Overlay of prime coil vs. full coil
-- Visualization of tangent points (prime positions)
-- Experimental factorization methods
-- Whitepaper included
+This project models natural numbers along a conical coil.
 
-## Quick Start
-```bash
-git clone https://github.com/YOURNAME/rsacrack.git
-cd rsacrack
-pip install -r requirements.txt
-python coil_model.py
+A full coil contains all integers.
 
-Status
+A prime coil overlays the prime numbers only.
 
-Coil equation formalized
+At each prime, the two coils touch tangentially, forming intersection points.
 
-Visualizations of primes vs. all numbers
+Composite numbers can be interpreted as inheriting structure from the primes beneath them on the coil.
 
-Factorization prototype
+👉 The goal: explore whether these geometric overlaps reveal shortcuts to prime factorization.
 
-    Benchmark against RSA key sizes
+🚀 Features
 
-Disclaimer
+3D coil model of natural numbers
 
-This project is experimental research.
-It is not a proven method for breaking RSA cryptography — use responsibly.
+Overlay of prime coil vs. full coil
 
+Visualization of tangent (prime) positions
 
----
+Factorization prototype (experimental)
 
-### 📄 `requirements.txt`
-```txt
-matplotlib
-numpy
-sympy
+Whitepaper included (whitepaper/rsacrack_whitepaper.pdf)
 
-📄 .gitignore
+⚡ Quick Start
 
-__pycache__/
-*.pyc
-*.pyo
-*.png
-*.pdf
-*.DS_Store
-
+Clone and set up:
