@@ -105,3 +105,9 @@ This project is purely educational and experimental.
     Compare with alternative coil parametrizations (logarithmic, Archimedean, etc.).
 
     Investigate connections to known prime-detecting functions.
+### Classify & fingerprint
+```bash
+python coil_classifier.py 91 --signature
+# prints class, factors, coil footprint (d1,d2,d3), and two signatures:
+# - geometry-aware (depends on r0, alpha, beta, L)
+# - geometry-invariant (depends only on factor pair)
