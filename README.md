@@ -1,113 +1,197 @@
 # RSAcrack
 
-**RSAcrack**: Exploring a *conical coil model* of numbers and primes to visualize overlaps, factorization, and potential cryptographic implications.
+**RSAcrack** explores a geometric/visual model for integers using a 3D **conical coil** and simple numerical fingerprints to quickly classify numbers (prime / semiprime / other) and surface helpful diagnostics.
+
+- Live site: **https://rsacrack.com**
+- API root: **`/api/classify?n=...`**
 
 ---
 
 ## 📖 Overview
 
-This project places the natural numbers along a 3D **conical spring (coil)**:
+We place the natural numbers along a 3D **conical spring (coil)**. At primes the “prime-only coil” and the “all-integers coil” are tangent. This intuition motivates quick fingerprints:
 
-- A **full coil** contains all integers.
-- A **prime coil** overlays only the prime numbers.
-- At each prime, the two coils touch tangentially, forming intersection points.
-- **Composite numbers** inherit structure from the primes beneath them.
+- **Classify:** `prime`, `semiprime`, or `other` (unknown/not tested)
+- **Dots ≈ τ(n):** number of divisors (the “flattened coil tangencies” idea)
+- **Semiprime extras:** factor pair, normalized footprint features, and simple signatures
 
-👉 The goal: explore whether these **geometric overlaps** reveal shortcuts to **prime factorization** or alternative number-theoretic fingerprints.
+> We do **not** claim cryptographic breakthroughs here; this is an experiment in visualization + heuristics with clear limits.
 
 ---
 
 ## 🚀 Features
 
-- 📐 **3D coil model** of natural numbers
-- 🔍 Overlay of **prime coil vs. full coil**
-- 📊 Visualization of tangent (prime) positions
-- 🧮 **Divisor trail fingerprints** for distinguishing primes vs. composites
-- 📑 Whitepaper included: [`whitepaper/rsacrack_whitepaper.pdf`](whitepaper/rsacrack_whitepaper.pdf)
+- ⚙️ **REST API**: `/api/classify` and `/api/factor`
+- 🖥 **Web UI**: interactive canvas + **Results** panel (shows class, dots, status, factors if semiprime)
+- 🧠 **Why this works**: inline explanation panel tied to each result
+- 🔎 **Semiprime footprint** (for small/medium `n`) with normalized features & signatures
+- 🧪 **Test gallery** (below) with known values across types
 
 ---
 
-## 🛠 Usage
-
-Clone and set up:
+## 🕹 Quick Start (local dev)
 
 ```bash
 git clone https://github.com/onojk/rsacrack.git
 cd rsacrack
-python3 -m venv .venv
-source .venv/bin/activate
+
+# (optional) venv
+python3 -m venv rsacrack-venv
+source rsacrack-venv/bin/activate
+
 pip install -r requirements.txt
 
-Single Number Trail
+# Run dev server (defaults HOST=127.0.0.1 PORT=8001)
+python app_demo.py --debug
+# open http://127.0.0.1:8001
 
-Compute and visualize the divisor trail for a number:
+Systemd / Gunicorn (prod)
 
-python trail_length.py 97 --plot
-# -> writes trail_97_prime.png
+A helper script is included:
 
-Range Comparison
+# from repo root
+chmod +x manage_rsacrack.sh
 
-Scan a range and export a CSV of "trail excess":
+# Restart service cleanly and verify
+./manage_rsacrack.sh
 
-python trail_compare.py 2 200
-# -> writes trail_excess.csv
+# Status only
+./manage_rsacrack.sh --status
 
-📊 Divisor-Trail Fingerprint
+# Dev run on another port (stops service first)
+./manage_rsacrack.sh --dev 5000
 
-Define a conical coil C(t)C(t).
-For nn, let D(n)={d∣n}D(n)={d∣n} sorted.
+Health checks:
 
-    Trail length:
-    L(n)=∑i∥C(di+1)−C(di)∥
-    L(n)=i∑​∥C(di+1​)−C(di​)∥
+curl -sS http://127.0.0.1:8001/healthz && echo
+curl -sS https://rsacrack.com/healthz && echo
 
-    Chord:
-    Chord(n)=∥C(n)−C(1)∥
-    Chord(n)=∥C(n)−C(1)∥
+🌐 Web UI
 
-    Excess:
-    E(n)=L(n)−Chord(n)
-    E(n)=L(n)−Chord(n)
+Open https://rsacrack.com.
+Controls:
 
-Properties:
+    n – number to classify
 
-    Prime p⇒D(p)={1,p}⇒E(p)=0p⇒D(p)={1,p}⇒E(p)=0
-    (shortest possible trail).
+    Coil render params: r0, alpha, beta, L (optional)
 
-    Composite n⇒E(n)>0n⇒E(n)>0.
+    Classify + Render button runs /api/classify and updates:
 
-Thus, E(n)E(n) acts as a fingerprint:
-zero excess → prime, positive excess → composite.
-🖼 Visuals
+        Badge with prime/semiprime/unknown (color hints)
 
-Prime (n=97)
+        Results JSON (pretty)
 
-Composite (n=98)
-trail_98_composite
-🔒 Security & Ethical Disclaimer
+        Why this works panel (expanded by default)
+        Includes: n_str, tested class, divisor dots (τ(n)), suspected class from dots, and JS-safety.
 
-This project is purely educational and experimental.
+    Tip: hard refresh to bust cache if you edit the UI: Ctrl+Shift+R (Cmd+Shift+R on macOS).
 
-    Only explores toy factorizations (small semiprimes, 32–64 bits).
+🧭 API
+GET /api/classify?n=... (plus optional r0, alpha, beta, L)
 
-    Not capable of factoring real cryptographic keys (RSA keys in practice are 2048+ bits).
+Response (fields may vary by class):
 
-    The purpose is to study mathematical patterns and visualization, not to attack real systems.
+{
+  "n": 91,
+  "n_str": "91",
+  "n_js_safe": true,           // true if |n| <= 2^53-1 and digits-only
+  "class": "semiprime",        // "prime" | "semiprime" | "other"
+  "prime_status": "91 is NOT prime (semiprime)",
+  "tested": true,              // true for prime/semiprime/composite; false if unknown
+  "dots": 4,                   // τ(n), computed exactly up to 1e12; null above
+  "suspected": "composite",    // from τ(n): 1=special, 2=prime, >2=composite
+  "primes": [7, 13],           // present for semiprime
+  "normalized": {...},         // semiprime footprint features (if available)
+  "balance": 0.62,
+  "bit_gap": 1,
+  "sig_geom": "...",           // optional geometry-aware signature
+  "sig_invariant": "..."       // optional invariant signature
+}
 
-    Please use responsibly: attempting to crack real encryption without permission is illegal and unethical.
+GET /api/factor?n=... (small trial)
 
-🔮 Next Steps
+    Quickly detects prime or semiprime by tiny trial division; returns "other" if inconclusive.
 
-    Sweep larger ranges (e.g. up to n=10,000n=10,000) to study excess patterns.
+🧪 Test Gallery
 
-    Explore scaling laws of E(n)E(n) for semiprimes.
+Try these known values in the UI or with curl:
+n	Type	τ(n) (dots)	Notes / Factors
+1	Special	1	unique, not prime
+2	Prime	2	smallest prime
+3	Prime	2	prime
+4	Composite	3	2×2 (square)
+6	Semiprime	4	2×3
+15	Semiprime	4	3×5
+91	Semiprime	4	7×13 (good demo)
+899	Semiprime	4	29×31
+104729	Prime	2	10000th prime
+2310	Composite	32	2×3×5×7×11
+360360	Composite	192	2×3×5×7×11×13 (very rich)
+10403	Semiprime	4	101×103
+19879	Prime	2	larger prime
+999983	Prime	2	largest 6-digit prime
+1000003	Prime	2	~1e6 range prime
+10^40	Other	—	τ(n) not computed above 1e12; UI shows unknown
+10000000000000000000000000000000000000061	Other	—	large; unknown
 
-    Compare with alternative coil parametrizations (logarithmic, Archimedean, etc.).
+Examples:
 
-    Investigate connections to known prime-detecting functions.
-### Classify & fingerprint
-```bash
-python coil_classifier.py 91 --signature
-# prints class, factors, coil footprint (d1,d2,d3), and two signatures:
-# - geometry-aware (depends on r0, alpha, beta, L)
-# - geometry-invariant (depends only on factor pair)
+# semiprime
+curl -sS "https://rsacrack.com/api/classify?n=91" | jq
+
+# prime
+curl -sS "https://rsacrack.com/api/classify?n=104729" | jq
+
+# highly composite
+curl -sS "https://rsacrack.com/api/classify?n=360360" | jq
+
+🧩 Why this works (intuition)
+
+    Define dots = τ(n), the number of positive divisors of n.
+
+    In the “flattened coil” picture, each divisor corresponds to a “tangent hit.” Counting hits ≈ counting divisors.
+
+Consequences
+
+    τ(1) = 1 → special (only 1 divides 1)
+
+    τ(n) = 2 → prime (divisors are {1, n})
+
+    τ(n) = 4 → typical semiprime (divisors {1, p, q, pq})
+
+    τ(n) > 2 → composite
+
+Limits
+
+    We compute τ(n) exactly up to 10¹². Above that we report unknown for dots and avoid misleading float output by returning n_str and n_js_safe.
+
+🧱 Project Layout
+
+rsacrack/
+├─ app_demo.py            # Flask app (web + API)
+├─ manage_rsacrack.sh     # restart/status/dev helpers for systemd+gunicorn
+├─ web/
+│  └─ index.html          # UI (canvas + results + “Why this works”)
+├─ coil_classifier.py     # classification and footprint helpers
+├─ whitepaper/rsacrack_whitepaper.pdf
+└─ requirements.txt
+
+🔒 Ethics & Scope
+
+    Educational and experimental.
+
+    Only small/medium toy examples; not intended for real cryptographic key recovery.
+
+    Please use responsibly and legally.
+
+🤝 Contributing
+
+Issues and PRs welcome! Ideas:
+
+    Better large-n heuristics for τ(n)
+
+    Alternative coil parametrizations
+
+    Stronger semiprime footprint features
+
+    UI polish & accessibility
