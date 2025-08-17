@@ -31,3 +31,15 @@ Whitepaper included (whitepaper/rsacrack_whitepaper.pdf)
 ⚡ Quick Start
 
 Clone and set up:
+
+---
+
+## 🔒 Security & Ethical Disclaimer
+
+This project is **purely educational and experimental**.  
+It explores toy factorization methods, geometric models of numbers, and visualizations of primes.  
+
+- The code only targets **small, synthetic semiprimes** (e.g., 32–64 bits) that are generated for testing.  
+- It is **not capable of factoring real cryptographic keys** (RSA keys used in practice are 2048 bits or larger).  
+- The purpose is to **study mathematical patterns and algorithm behavior**, not to attack real-world security systems.  
+- Please use responsibly: attempting to crack real encryption without permission is illegal and unethical.  
