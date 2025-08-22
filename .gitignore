@@ -1,3 +1,14 @@
+# Python
 __pycache__/
-cache/
 *.pyc
+
+# Virtualenv
+.venv/
+
+# Local backups
+*.bak.*
+*.bad.*
+
+# Data caches
+cache/
+*.csv
