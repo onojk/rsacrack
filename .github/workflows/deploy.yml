@@ -1,12 +1,24 @@
 name: Deploy to RSACrack
+
 on:
-  push:
-    branches: [ main ]
+  workflow_run:
+    workflows: ["CI"]      # matches name: CI in .github/workflows/ci.yml
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: true
 
 jobs:
   deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://rsacrack.com
     steps:
       - uses: actions/checkout@v4
 
@@ -35,3 +47,9 @@ jobs:
           done
           echo "Health check failed"
           exit 1
+
+      - name: Summary
+        run: |
+          echo "### Deployed to production ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "- SHA: \`$GITHUB_SHA\`"       >> "$GITHUB_STEP_SUMMARY"
+          echo "- Host: ${{ secrets.RSACRACK_HOST }}" >> "$GITHUB_STEP_SUMMARY"
