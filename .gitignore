@@ -1,5 +1,21 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
+
+# Logs / runtime
 *.log
-.env
+gunicorn.err
+gunicorn.out
+
+# Local artifacts
+cache/
+backups/
+*.bak.*
+*.bad.*
+
+# Large data dumps
+*.csv.gz
+
+# OS/editor junk
+.DS_Store
