@@ -416,3 +416,5 @@ curl -sS "https://rsacrack.com/api/factor?n=110000479000513&budget_ms=4000" | jq
 Happy hacking 👋
 
 ![CI](https://github.com/onojk/rsacrack/actions/workflows/ci.yml/badge.svg)
+
+![Deploy](https://github.com/onojk/rsacrack/actions/workflows/deploy.yml/badge.svg)
