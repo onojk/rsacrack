@@ -18,5 +18,20 @@ jobs:
           key: ${{ secrets.RSACRACK_SSH_KEY }}
           script: bash ~/rsacrack/deploy.sh
 
-      - name: Health check
-        run: curl -fsS https://rsacrack.com/api/health
+      - name: Health check (domain, then IP)
+        env:
+          HOST: ${{ secrets.RSACRACK_HOST }}
+        run: |
+          set -euo pipefail
+          echo "Checking https://rsacrack.com/api/health"
+          for i in {1..10}; do
+            curl -fsS https://rsacrack.com/api/health && exit 0
+            sleep 3
+          done
+          echo "Domain not ready, trying http://$HOST/api/health"
+          for i in {1..10}; do
+            curl -fsS "http://$HOST/api/health" && exit 0
+            sleep 3
+          done
+          echo "Health check failed"
+          exit 1
