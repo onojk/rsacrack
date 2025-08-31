@@ -1,0 +1,60 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>RSAcrack · Tools</title>
+<style>
+  html,body{margin:0;padding:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Inter,sans-serif;background:#0b0f14;color:#e7eef7}
+  a{color:#9bd} code,pre{font-family:ui-monospace,Menlo,Consolas,monospace}
+  .wrap{max-width:980px;margin:0 auto;padding:24px}
+  .card{background:#0f151d;border:1px solid #1d2733;border-radius:14px;padding:16px 18px;box-shadow:0 1px 0 #0003}
+  h1{font-size:22px;margin:0 0 12px} h2{font-size:18px;margin:16px 0 10px}
+  label{display:block;font-size:13px;margin:10px 0 4px;color:#b9c7d9}
+  input,select,button{font:inherit} input{width:100%;padding:10px 12px;background:#0c1117;border:1px solid #22303f;border-radius:10px;color:#e7eef7;outline:none}
+  input:focus{border-color:#4aa8ff} .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  button{padding:10px 14px;border-radius:10px;border:1px solid #2b3a4d;background:#17314a;color:#e7eef7;cursor:pointer}
+  button:hover{background:#1d3a57} .muted{color:#9ab;opacity:.85} .results{white-space:pre-wrap;background:#0b0f14;border:1px solid #1d2733;border-radius:10px;padding:12px;min-height:60px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px} @media (max-width:900px){.grid,.row,.row3{grid-template-columns:1fr}}
+  .badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:12px;border:1px solid #263547;background:#101720;margin-left:8px}
+</style>
+<script defer src="./patch.js"></script>
+<script defer src="./main.js"></script>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>RSAcrack <span id="health" class="badge">checking…</span></h1>
+    <div class="muted">Classic factor/classify plus a 64-bit fail-fast lotto runner.</div>
+  </div>
+
+  <div style="height:12px"></div>
+  <div class="grid">
+    <div class="card">
+      <h2>Classic Factor / Classify</h2>
+      <label>n</label><input id="n" placeholder="e.g. 91 or 1000036000099" />
+      <div class="row">
+        <div><label>timeout_ms (0 = no limit)</label><input id="timeout_ms" type="number" min="0" value="5000" /></div>
+        <div><label>max_bits (optional)</label><input id="max_bits" type="number" min="0" placeholder="e.g. 64" /></div>
+      </div>
+      <div style="height:10px"></div>
+      <div class="row"><button id="runClassic">Run Classic</button><button id="runClassify">Classify</button></div>
+      <div style="height:10px"></div>
+      <div class="muted">Classic result</div><div id="classic_out" class="results">—</div>
+      <div style="height:10px"></div>
+      <div class="muted">Classify result</div><div id="classify_out" class="results">—</div>
+    </div>
+    <div class="card">
+      <h2>Fail-fast Lotto (64-bit)</h2>
+      <label>n (0..2^64-1)</label><input id="n64" placeholder="unsigned 64-bit integer" />
+      <div class="row3">
+        <div><label>budget_ms</label><input id="budget_ms" type="number" min="1" value="5000" /></div>
+        <div><label>rho_restarts</label><input id="rho_restarts" type="number" min="0" placeholder="e.g. 1000" /></div>
+        <div><label>schedule</label><select id="schedule"><option value="luby">luby</option><option value="doubling">doubling</option><option value="fixed">fixed</option></select></div>
+      </div>
+      <div style="height:10px"></div>
+      <button id="runLotto">Run Lotto</button>
+      <div style="height:10px"></div>
+      <div class="muted">Lotto result</div><div id="lotto_out" class="results">—</div>
+    </div>
+  </div>
+</div>
+</body>

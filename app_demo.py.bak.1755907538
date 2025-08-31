@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+from pathlib import Path
+from time import perf_counter
+from typing import Any
+
+from flask import Flask, request, send_from_directory, jsonify
+
+from coil_classifier import (
+    coil_classify,
+    footprint_for_semiprime,
+    geometry_signature,
+    invariant_signature,
+)
+
+# --- Paths -------------------------------------------------------------------
+APP_DIR = Path(__file__).parent.resolve()
+WEB_DIR = APP_DIR / "web"
+CACHE_DIR = APP_DIR / "cache"
+WEB_DIR.mkdir(exist_ok=True)
+CACHE_DIR.mkdir(exist_ok=True)
+
+# --- Flask app ---------------------------------------------------------------
+app = Flask(__name__, static_folder=str(WEB_DIR))
+
+
+# --- Safe parsers ------------------------------------------------------------
+def _to_int(x: Any, default: int) -> int:
+    try:
+        s = str(x)
+        if not s or s.lower() == "none":
+            return default
+        return int(s)
+    except Exception:
+        return default
+
+
+def _to_float(x: Any, default: float) -> float:
+    try:
+        s = str(x)
+        if not s or s.lower() == "none" or s.startswith("[object "):
+            return default
+        return float(s)
+    except Exception:
+        return default
+
+
+# --- Tiny helpers ------------------------------------------------------------
+def _is_prime(n: int) -> bool:
+    if n < 2:
+        return False
+    if n % 2 == 0:
+        return n == 2
+    i = 3
+    while i * i <= n:
+        if n % i == 0:
+            return False
+        i += 2
+    return True
+
+
+def _trial_semiprime(n: int):
+    """Small, fast trial division to detect semiprimes."""
+    if n % 2 == 0:
+        p, q = 2, n // 2
+        return (p, q) if _is_prime(q) else None
+    i = 3
+    while i * i <= n and i <= 10_000_000:
+        if n % i == 0:
+            p, q = i, n // i
+            return (p, q) if _is_prime(p) and _is_prime(q) else None
+        i += 2
+    return None
+
+
+# --- Web UI ------------------------------------------------------------------
+@app.get("/")
+def index():
+    return send_from_directory(WEB_DIR, "index.html")
+
+
+@app.get("/web/<path:filename>")
+def web_static(filename: str):
+    return send_from_directory(WEB_DIR, filename)
+
+
+@app.get("/healthz")
+def healthz():
+    return "ok"
+
+
+# --- API: classify -----------------------------------------------------------
+@app.get("/api/classify")
+def api_classify():
+    n = _to_int(request.args.get("n", "0"), 0)
+    if n <= 0:
+        return jsonify(error="bad n"), 400
+
+    r0 = _to_float(request.args.get("r0", 1.0), 1.0)
+    alpha = _to_float(request.args.get("alpha", 0.0125), 0.0125)
+    beta = _to_float(request.args.get("beta", 0.005), 0.005)
+    L = _to_float(request.args.get("L", 360.0), 360.0)
+
+    klass = coil_classify(n)
+    out = {"n": n, "class": klass}
+
+    if klass == "semiprime":
+        try:
+            fp = footprint_for_semiprime(n, r0, alpha, beta, L)
+        except Exception as e:
+            out.update(
+                {
+                    "primes": [],
+                    "normalized": {},
+                    "balance": None,
+                    "bit_gap": None,
+                    "sig_geom": None,
+                    "sig_invariant": None,
+                    "footprint_error": str(e),
+                }
+            )
+        else:
+            out.update(fp)
+            try:
+                out["sig_geom"] = geometry_signature(n, fp, r0, alpha, beta, L)
+            except Exception:
+                pass
+            try:
+                out["sig_invariant"] = invariant_signature(n, fp)
+            except Exception:
+                pass
+
+    return jsonify(out)
+
+
+# --- API: factor -------------------------------------------------------------
+@app.get("/api/factor")
+def api_factor():
+    n = _to_int(request.args.get("n", "0"), 0)
+    if n <= 0:
+        return jsonify(error="bad n"), 400
+
+    t0 = perf_counter()
+
+    if _is_prime(n):
+        return jsonify(
+            {"class": "prime", "n": n, "ms": (perf_counter() - t0) * 1000.0}
+        )
+
+    pair = _trial_semiprime(n)
+    if pair:
+        p, q = pair
+        return jsonify(
+            {
+                "class": "semiprime",
+                "n": n,
+                "factors": [int(p), int(q)],
+                "method": "trial",
+                "ms": (perf_counter() - t0) * 1000.0,
+            }
+        )
+
+    return jsonify(
+        {
+            "class": "other",
+            "n": n,
+            "factors": [],
+            "method": "trial",
+            "ms": (perf_counter() - t0) * 1000.0,
+        }
+    )
+
+
+# --- Gunicorn safety guard ---------------------------------------------------
+try:
+    app  # type: ignore
+except NameError:
+    app = Flask(__name__, static_folder=str(WEB_DIR))
+
+
+# --- Dev run -----------------------------------------------------------------
+if __name__ == "__main__":
+    import os, argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8001")))
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
+    app.run(host=args.host, port=args.port, debug=args.debug)
+
+
+# --- dot-count helper --------------------------------------------------------
+def dot_count(n: int) -> int:
+    """Return number of positive divisors of n."""
+    if n <= 0:
+        return 0
+    if n == 1:
+        return 1
+    c = 2  # 1 and n
+    i = 2
+    r = int(n**0.5)
+    while i <= r:
+        if n % i == 0:
+            c += 1 if i * i == n else 2
+        i += 1
+    return c
+
+
+# --- after_request hook ------------------------------------------------------
+try:
+    import json
+    from flask import request
+
+    @app.after_request
+    def _normalize_n_and_status(resp):
+        try:
+            if request.path == "/api/classify" and resp.mimetype and resp.mimetype.startswith("application/json"):
+                data = resp.get_json(silent=True)
+                if isinstance(data, dict):
+                    display_n = (request.args.get("n") or data.get("n_str") or
+                                 (str(data.get("n")) if data.get("n") is not None else ""))
+                    data["n_str"] = display_n
+
+                    cls = data.get("class")
+                    if cls == "prime":
+                        msg = f"{display_n} is PRIME"
+                    elif cls in ("semiprime", "composite"):
+                        msg = f"{display_n} is NOT prime ({cls})"
+                    else:
+                        msg = f"{display_n} is UNKNOWN (not tested)"
+                    data["prime_status"] = msg
+
+                    tested = (cls in ("prime", "semiprime", "composite"))
+                    data["tested"] = bool(tested)
+
+                    try:
+                        s = str(display_n).lstrip("+")
+                        js_safe = s.isdigit() and len(s) <= 15 and int(s) <= 9007199254740991
+                    except Exception:
+                        js_safe = False
+                    data["n_js_safe"] = bool(js_safe)
+                    if not js_safe:
+                        data["n"] = None
+
+                    dots = None
+                    suspected = "unknown"
+                    try:
+                        s_in = str(display_n).lstrip("+")
+                        if s_in.isdigit():
+                            n_int = int(s_in)
+                            if n_int <= 10**12:
+                                dots = dot_count(n_int)
+                                if n_int == 1:
+                                    suspected = "special"
+                                elif dots == 2:
+                                    suspected = "prime"
+                                elif dots > 2:
+                                    suspected = "composite"
+                    except Exception:
+                        pass
+                    data["dots"] = dots
+                    data["suspected"] = suspected
+
+                    resp.set_data(json.dumps(data))
+        except Exception:
+            pass
+        return resp
+except Exception:
+    pass

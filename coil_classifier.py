@@ -121,7 +121,7 @@ def footprint_for_semiprime(n: int, r0: float, alpha: float, beta: float, L: flo
     # per-step "slope" (distance per integer index)
     # Avoid division by zero: deltas are guaranteed positive here
     s1 = d1 / (n - q)
-    s2 = d2 / (q - p)
+    s2 = (0.0 if (q == p) else (d2 / (q - p)))
     s3 = d3 / (p - 1)
 
     total = d1 + d2 + d3

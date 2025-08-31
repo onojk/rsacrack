@@ -1,14 +1,5 @@
-# Python
+.venv/
 __pycache__/
 *.pyc
-
-# Virtualenv
-.venv/
-
-# Local backups
-*.bak.*
-*.bad.*
-
-# Data caches
-cache/
-*.csv
+*.log
+.env

@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>RSAcrack Coil</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root{
+    --bg:#0b0f16;
+    --panel:#0f1624;
+    --ink:#e6eefc;
+    --sub:#9bb1d9;
+    --line:#243049;
+    --line2:#2b3650;
+    --brand1:#2671ff;
+    --brand2:#23d2b0;
+    --ok-bg:#0d2a1a; --ok-bd:#1f6b3d; --ok-ink:#9bffcb;
+    --bad-bg:#2a130f; --bad-bd:#6b2c1f; --bad-ink:#ffb89b;
+    --unk-bg:#141820; --unk-bd:#2b3650; --unk-ink:#b8c7e6;
+    --note:#cfe3ff;
+    --shadow:0 10px 30px rgba(0,0,0,.35);
+    --rad:14px;
+  }
+  html,body { height:100%; margin:0 }
+  body { font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink) }
+
+  .wrap{
+    display:grid;
+    grid-template-columns: 420px 1fr;
+    gap:18px;
+    min-height:100vh;
+    padding:16px;
+    box-sizing:border-box;
+  }
+  @media (max-width:1000px){
+    .wrap{ grid-template-columns: 1fr; }
+  }
+
+  .card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--rad);
+    box-shadow:var(--shadow);
+  }
+
+  /* controls */
+  .controls{ padding:14px; }
+  .title{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .title small{ color:var(--sub) }
+  label{ color:#a9b7d9; font-size:12px; }
+  .grid{ display:grid; grid-template-columns:90px 1fr 64px; gap:10px; align-items:center; }
+  .grid .full{ grid-column:1/-1; }
+  input{
+    background:var(--panel); color:var(--ink);
+    border:1px solid var(--line); border-radius:10px;
+    padding:8px 10px; font-size:14px;
+  }
+  .btn{
+    background:linear-gradient(90deg,var(--brand1),var(--brand2));
+    border:none; color:white; border-radius:12px;
+    padding:10px 12px; font-weight:600; cursor:pointer;
+  }
+  .btn:disabled{ opacity:.6; cursor:not-allowed }
+  .mini{ font-size:12px; color:var(--sub); }
+  .badge{
+    display:inline-block; min-height:38px;
+    padding:10px 12px; border-radius:12px; border:1px solid var(--line2);
+    background:#0f1726; color:#9ad7ff; font-size:13px; line-height:1.2;
+  }
+  .badge.ok   { background:var(--ok-bg);  border-color:var(--ok-bd);  color:var(--ok-ink); }
+  .badge.bad  { background:var(--bad-bg); border-color:var(--bad-bd); color:var(--bad-ink); }
+  .badge.unk  { background:var(--unk-bg); border-color:var(--unk-bd); color:var(--unk-ink); }
+  .row{ display:flex; gap:10px; align-items:center; }
+  .spacer{ height:10px }
+
+  /* result */
+  .result{ display:grid; grid-template-rows:auto 1fr auto auto; padding:14px; gap:12px; }
+  .flex-row{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  #json{
+    white-space:pre; overflow:auto; background:var(--panel);
+    border:1px solid var(--line); border-radius:12px; padding:12px;
+    min-height:160px;
+  }
+  .pill{ display:inline-block; padding:6px 10px; border:1px solid var(--line2);
+         border-radius:999px; color:#bfe8ff; font-size:12px; background:#13233a; cursor:pointer; }
+
+  /* WHY panel */
+  .note{background:#0f1624;border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:8px;color:var(--note)}
+  .why-grid{display:grid;grid-template-columns:1fr 2fr;gap:12px}
+  .why-kv>div{margin:4px 0}
+  .why-kv strong{color:#9ad7ff}
+  .why-math p{margin:.4em 0;color:#b7c8e6}
+
+  #stage{ height:100%; min-height:260px; border:1px dashed var(--line); border-radius:12px; }
+  #toast{ position:fixed; bottom:16px; left:16px; background:#13233a; border:1px solid var(--line2);
+          color:#bfe8ff; padding:8px 12px; border-radius:10px; opacity:0; transition:.25s; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- LEFT -->
+  <div class="card controls">
+    <div class="title">
+      <strong>RSAcrack Coil</strong>
+      <small id="ready">ready</small>
+      <span class="spacer"></span>
+      <button id="copy" class="pill">Copy JSON</button>
+    </div>
+    <div class="grid">
+      <label for="n">n</label><input id="n" type="text" value="91"><span></span>
+      <label for="r0">r0</label><input id="r0" type="number" step="0.01" value="1.0"><span></span>
+      <label for="alpha">alpha</label><input id="alpha" type="number" step="0.001" value="0.0125"><span></span>
+      <label for="beta">beta</label><input id="beta" type="number" step="0.001" value="0.005"><span></span>
+      <label for="L">L</label><input id="L" type="number" step="1" value="360"><span></span>
+      <div class="row full">
+        <button id="go" class="btn">Classify + Render</button>
+        <span id="badge" class="badge">Waiting…</span>
+      </div>
+      <div class="mini full">Tip: try <code>91</code>, <code>17947</code>, <code>118901521</code>.</div>
+    </div>
+  </div>
+
+  <!-- RIGHT -->
+  <div class="card result">
+    <div class="flex-row"><div class="mini">Results</div></div>
+    <div id="stage"></div>
+    <div id="json"></div>
+    <div>
+      <button id="why-btn" class="pill">Why this works ▸</button>
+      <div id="why-panel" class="note" style="display:none"></div>
+    </div>
+    <div class="mini">Frontend: full-width layout · JSON &amp; badge update · “Why this works” in Results card with factors highlight.</div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+(function(){
+  const $ = (id)=>document.getElementById(id);
+  function toast(msg){const t=$('toast');if(!t)return;t.textContent=msg;t.style.opacity=1;setTimeout(()=>t.style.opacity=0,1800);}
+  function setLoading(on){$('go').disabled=!!on;$('ready').textContent=on?'working…':'ready';}
+  function badgeClassFor(cls){if(cls==='prime')return'badge ok';if(cls==='semiprime'||cls==='composite')return'badge bad';return'badge unk';}
+  function setBadge(data){const b=$('badge');if(!b)return;const cls=data?.class??null;const msg=data?.prime_status||data?.suspected||'—';b.className=badgeClassFor(cls);b.textContent=msg;}
+  function updateWhy(d){
+    const panel=$('why-panel'); if(!panel) return;
+    if(!d){ panel.innerHTML=''; return; }
+    const cls=d.class??'unknown'; const n=d.n_str||String(d.n??''); const dots=(d.dots??'—'); const suspected=d.suspected??'unknown'; const jsSafe=d.n_js_safe?'yes':'no';
+    const lines=[`<div><strong>n:</strong> ${n}</div>`,`<div><strong>tested class:</strong> ${cls}</div>`,`<div><strong>dot count τ(n):</strong> ${dots}</div>`,`<div><strong>suspected from dots:</strong> ${suspected}</div>`,`<div><strong>JS-safe integer:</strong> ${jsSafe}</div>`];
+    if(Array.isArray(d.primes)&&d.primes.length===2){lines.push(`<div style="margin-top:6px;color:#ffe680"><strong>⚡ Factors:</strong> ${d.primes[0]} × ${d.primes[1]}</div>`);}
+    const math=`<p><em>Idea.</em> Flatten the coil: each positive divisor of <code>n</code> corresponds to a tangency “dot”. Total = <code>τ(n)</code>.</p><p><code>τ(1)=1</code> special; <code>τ(n)=2</code> prime; <code>τ(n)&gt;2</code> composite (semiprimes usually <code>τ=4</code> unless squared prime).</p>`;
+    panel.innerHTML=`<div class="why-grid"><div class="why-kv">${lines.join('')}</div><div class="why-math">${math}</div></div>`;
+  }
+  async function go(){
+    const n=$('n').value.trim()||'0';const r0=$('r0').value;const alpha=$('alpha').value;const beta=$('beta').value;const L=$('L').value;
+    const qs=new URLSearchParams({n,r0,alpha,beta,L}).toString();setLoading(true);
+    try{const r=await fetch(`/api/classify?${qs}`);const data=await r.json();$('json').textContent=JSON.stringify(data,null,2);setBadge(data);updateWhy(data);}
+    catch(e){$('json').textContent=JSON.stringify({error:String(e)},null,2);setBadge({class:'other',prime_status:'request failed'});updateWhy(null);}
+    finally{setLoading(false);}
+  }
+  document.addEventListener('DOMContentLoaded',()=>{
+    $('go').addEventListener('click',go);
+    $('copy').addEventListener('click',()=>{try{navigator.clipboard.writeText($('json').textContent||'');toast('JSON copied');}catch{toast('Copy failed');}});
+    $('why-btn').addEventListener('click',()=>{const p=$('why-panel');const vis=p.style.display!=='none';p.style.display=vis?'none':'block';$('why-btn').textContent=vis?'Why this works ▸':'Why this works ▾';});
+  });
+})();
+</script>
+</body>
+</html>

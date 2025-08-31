@@ -1,0 +1,16 @@
+nohup: ignoring input
+[2025-08-28 18:57:15 +0000] [1225736] [INFO] Starting gunicorn 23.0.0
+[2025-08-28 18:57:15 +0000] [1225736] [ERROR] Connection in use: ('127.0.0.1', 8080)
+[2025-08-28 18:57:15 +0000] [1225736] [ERROR] connection to ('127.0.0.1', 8080) failed: [Errno 98] Address already in use
+[2025-08-28 18:57:16 +0000] [1225736] [INFO] Listening at: http://127.0.0.1:8080 (1225736)
+[2025-08-28 18:57:16 +0000] [1225736] [INFO] Using worker: gthread
+[2025-08-28 18:57:16 +0000] [1225742] [INFO] Booting worker with pid: 1225742
+[2025-08-28 18:57:16 +0000] [1225743] [INFO] Booting worker with pid: 1225743
+[2025-08-30 08:30:41 +0000] [1225736] [ERROR] Worker (pid:1225743) was sent SIGHUP!
+[2025-08-30 08:30:41 +0000] [1225736] [ERROR] Worker (pid:1225742) was sent SIGHUP!
+[2025-08-30 08:30:41 +0000] [1225736] [INFO] Handling signal: hup
+[2025-08-30 08:30:41 +0000] [1225736] [INFO] Hang up: Master
+[2025-08-30 08:30:41 +0000] [1225736] [INFO] Handling signal: term
+[2025-08-30 08:30:41 +0000] [1765706] [INFO] Booting worker with pid: 1765706
+[2025-08-30 08:30:41 +0000] [1765707] [INFO] Booting worker with pid: 1765707
+[2025-08-30 08:31:11 +0000] [1225736] [INFO] Shutting down: Master

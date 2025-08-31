@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>RSAcrack Coil</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  html,body,#c { height:100%; width:100%; margin:0 }
+  body { font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#0b0f16; color:#e6eefc }
+  .panel{position:fixed;top:12px;left:12px;background:#111826;border:1px solid #222b3c;border-radius:14px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  .row{display:grid;grid-template-columns:80px 1fr 48px;gap:8px;margin:6px 0}
+  .row label{color:#a9b7d9;font-size:12px;align-self:center}
+  .row input{background:#0f1624;color:#e6eefc;border:1px solid #243049;border-radius:10px;padding:8px 10px}
+  .btn{background:linear-gradient(90deg,#2671ff,#23d2b0);border:none;color:white;border-radius:12px;padding:10px 12px;font-weight:600;cursor:pointer}
+  .tag{display:inline-block;padding:4px 8px;border-radius:10px;font-size:12px;border:1px solid #2b3650;color:#9ad7ff;background:#0f1726;margin-top:6px}
+  #json{white-space:pre;max-width:360px;overflow:auto;border:1px solid #243049;border-radius:12px;padding:10px;margin-top:8px;background:#0f1624}
+  #toast{position:fixed;bottom:16px;left:16px;background:#13233a;border:1px solid #2b3850;color:#bfe8ff;padding:8px 12px;border-radius:10px;opacity:0;transition:.3s}
+  .small{font-size:12px;color:#8fb0cf}
+  #out{white-space:pre-wrap;background:#0f1624;border:1px solid #243049;border-radius:12px;padding:10px;margin:8px 0;max-width:480px;overflow:auto}
+</style>
+</head>
+<body>
+<div class="panel">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+    <strong>RSAcrack Coil</strong><span id="ready" class="small">ready</span>
+  </div>
+  <div class="row"><label>n</label><input id="n" type="text" value="91"><button id="copy" class="small">Copy JSON</button></div>
+  <div class="row"><label>r0</label><input id="r0" type="number" step="0.01" value="1.0"><span></span></div>
+  <div class="row"><label>alpha</label><input id="alpha" type="number" step="0.001" value="0.0125"><span></span></div>
+  <div class="row"><label>beta</label><input id="beta" type="number" step="0.001" value="0.005"><span></span></div>
+  <div class="row"><label>L</label><input id="L" type="number" step="1" value="360"><span></span></div>
+  <div style="display:flex;gap:8px;margin-top:8px">
+    <button id="go" class="btn">Classify + Render</button>
+<h3 style="margin-top:1em;color:#ccc;">Results</h3>
+<pre id="out" style="max-height:200px;overflow:auto;margin-top:0.5em;background:#111;padding:0.5em;border-radius:8px;"></pre>
+    <span id="badge" class="tag">Waiting…</span>
+  </div>
+  <div id="json"></div>
+  <details id="notes" open class="small" style="margin-top:8px;max-width:560px">
+    <summary><strong>Why the dot count works</strong></summary>
+    <div class="small" style="margin-top:6px;line-height:1.35">
+      <p><strong>Model:</strong> a “dot” appears for each positive divisor d of n (i.e., d divides n). Then the dot count equals the divisor-count function τ(n).</p>
+      <ul style="margin:6px 0 0 18px">
+        <li>n = 1 → τ(n) = 1 → special (one dot).</li>
+        <li>n is prime ↔ τ(n) = 2 (dots are {1, n}).</li>
+        <li>n is semiprime:
+          <ul style="margin:4px 0 0 18px">
+            <li>n = p² → τ(n) = 3 (dots {1, p, p²}).</li>
+            <li>n = p·q with p ≠ q → τ(n) = 4 (dots {1, p, q, pq}).</li>
+          </ul>
+        </li>
+        <li><em>Cube exception:</em> τ(n) = 4 also happens for n = p³. So if τ(n)=4, check “is n a perfect cube?” If yes → not semiprime; if no → semiprime.</li>
+        <li>τ(n) ≥ 5 (and not the cube case) → composite, not semiprime.</li>
+      </ul>
+      <p style="margin-top:6px"><strong>Why factors are in the dots:</strong> for semiprime n, the dots include p and q (or p for p²), so listing dots reveals the factors.</p>
+      <p style="margin-top:6px"><strong>Large n:</strong> exact dot counts may be skipped for huge inputs; the API marks these as <code>tested=false</code> and the UI shows “UNKNOWN (not tested)”.</p>
+    </div>
+  </details>
+  <div class="small" style="margin-top:6px">Tip: try <code>91</code>, <code>17947</code>, <code>118901521</code>.</div>
+</div>
+
+<canvas id="c"></canvas>
+<div id="toast"></div>
+
+<!-- fallback output area -->
+<h3 style="margin-top:1em;color:#ccc;">Results</h3>
+<pre id="out">[output will appear here]</pre>
+
+<script>
+// --- Minimal fallback go() ---
+window.go = async function(){
+  const nVal = document.getElementById("n").value.trim() || "0";
+  const r0   = document.getElementById("r0").value;
+  const alpha= document.getElementById("alpha").value;
+  const beta = document.getElementById("beta").value;
+  const L    = document.getElementById("L").value;
+
+  const qs = new URLSearchParams({n:nVal,r0,alpha,beta,L}).toString();
+  const outEl = document.getElementById("out");
+  try {
+    const r = await fetch(`/api/classify?${qs}`);
+    const data = await r.json();
+    outEl.textContent = JSON.stringify(data,null,2);
+  } catch(e){
+    outEl.textContent = "Error: " + (e.message||e);
+  }
+};
+
+// wire button
+document.addEventListener("DOMContentLoaded",()=>{
+  const b=document.getElementById("go");
+  if(b) b.addEventListener("click",()=>window.go());
+});
+</script>
+<script>
+(function(){
+  function updateBadgeFromJSON(txt){
+    try{
+      const data = JSON.parse(txt);
+      const badge = document.getElementById('badge');
+      if (!badge) return;
+      const cls = (data && data.class) || null;
+      const msg = (data && data.prime_status) || '—';
+const extra = (cls === 'other' && data && data.suspected && data.suspected !== 'unknown')
+  ? ` · suspected: ${data.suspected}` : '';
+badge.textContent = msg + extra;
+
+      // base style
+      badge.style.background = '#0f1726';
+      badge.style.borderColor = '#2b3650';
+      badge.style.color = '#9ad7ff';
+
+      if (cls === 'prime') {
+        badge.style.background = '#0d2a1a';
+        badge.style.borderColor = '#1f6b3d';
+        badge.style.color = '#9bffcb';
+      } else if (cls === 'semiprime' || cls === 'composite') {
+        badge.style.background = '#2a130f';
+        badge.style.borderColor = '#6b2c1f';
+        badge.style.color = '#ffb89b';
+      } else {
+        // unknown / not tested
+        badge.style.background = '#141820';
+        badge.style.borderColor = '#2b3650';
+        badge.style.color = '#b8c7e6';
+      }
+    } catch (e) {
+      /* ignore parse errors */
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const out = document.getElementById('out');
+    if (!out) return;
+
+    // initialize once
+    updateBadgeFromJSON(out.textContent || '{}');
+
+    // keep badge synced whenever #out changes
+    const mo = new MutationObserver(() => {
+      updateBadgeFromJSON(out.textContent || '{}');
+    });
+    mo.observe(out, { characterData: true, childList: true, subtree: true });
+  });
+})();
+</script>
+
+</body>
+</html>

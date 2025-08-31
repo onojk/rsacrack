@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+import os, json, random, time, multiprocessing as mp
+from collections import Counter
+from flask import Flask, request, jsonify
+
+from tangent_prime_test import (
+    is_probable_prime, factor,
+    tangent_equal_split_info, tangent_prime_test_split_info,
+)
+
+DEFAULT_MAX_BITS_FOR_FACTOR = 4096
+HARD_MAX_BITS               = 16384   # keep a sanity ceiling
+app = Flask(__name__)
+
+def _factor_worker(n, q):
+    try:
+        fs = factor(n)
+        q.put(("ok", fs))
+    except Exception as e:
+        q.put(("err", str(e)))
+
+def factor_with_timeout(n: int, timeout_ms: int):
+    # 0 or negative => infinite
+    if timeout_ms and timeout_ms > 0:
+        os.environ["FACTOR_MAX_SECONDS"] = str(max(1, timeout_ms // 1000))
+    else:
+        os.environ["FACTOR_MAX_SECONDS"] = "0"  # infinite
+    q = mp.Queue()
+    p = mp.Process(target=_factor_worker, args=(n, q), daemon=True)
+    p.start()
+    if timeout_ms and timeout_ms > 0:
+        p.join(timeout_ms / 1000.0)
+        if p.is_alive():
+            p.terminate(); p.join()
+            return None, "timeout"
+    else:
+        p.join()  # wait indefinitely
+    if q.empty(): return None, "noresult"
+    tag, payload = q.get()
+    return (payload, None) if tag == "ok" else (None, "error:" + payload)
+
+def to_counter_map(fs):
+    if isinstance(fs, dict):
+        return {str(int(k)): int(v) for k, v in fs.items()}
+    if isinstance(fs, (list, tuple)):
+        fs = [int(x) for x in fs]; fs.sort()
+        return {str(k): int(v) for k, v in Counter(fs).items()}
+    try:
+        return {str(int(fs)): 1}
+    except Exception:
+        return {}
+
+HTML = """<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RSAcrack · Coil & Tangent Tools</title>
+<style>
+ body{font:16px/1.45 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:920px;margin:32px auto;padding:0 16px}
+ .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0}
+ label{display:block;margin:8px 0 4px}
+ input[type=text],input[type=number]{width:100%;max-width:520px;padding:10px;border-radius:10px;border:1px solid #bbb}
+ button{padding:10px 14px;border-radius:10px;border:1px solid #333;background:#111;color:#fff}
+ button[disabled]{opacity:.6}
+ .muted{color:#666}
+</style>
+<h1>RSAcrack · Coil & Tangent Tools</h1>
+<div class="card">
+  <h2>Factor / Classify</h2>
+  <form onsubmit="runFactor(event)">
+    <label>n</label>
+    <input id="n" type="text" placeholder="enter integer"/>
+    <label style="margin-top:10px">timeout_ms (0 = no limit)</label>
+    <input id="t" type="number" min="0" value="0"/>
+    <label style="margin-top:10px">max_bits</label>
+    <input id="b" type="number" min="8" max=\""""+str(HARD_MAX_BITS)+"""\" value=\""""+str(DEFAULT_MAX_BITS_FOR_FACTOR)+"""\"/>
+    <div style="margin-top:10px">
+      <button id="runBtn">Run</button>
+      <span class="muted" id="hint">Interactive factoring up to """+str(DEFAULT_MAX_BITS_FOR_FACTOR)+""" bits. Timeout 0 = unlimited.</span>
+    </div>
+  </form>
+  <pre id="factout" class="muted">Result will appear here…</pre>
+</div>
+<script>
+async function runFactor(e){
+  e.preventDefault();
+  const btn=document.getElementById('runBtn'), out=document.getElementById('factout');
+  const n=document.getElementById('n').value.trim();
+  const t=document.getElementById('t').value.trim();
+  const b=document.getElementById('b').value.trim();
+  btn.disabled=true; const old=btn.textContent; btn.textContent='Working…';
+  out.textContent='Crunching…';
+  try{
+    const url='/api/factor?n='+encodeURIComponent(n)+'&timeout_ms='+encodeURIComponent(t)+'&max_bits='+encodeURIComponent(b);
+    const r=await fetch(url);
+    const j=await r.json();
+    out.textContent=JSON.stringify(j,null,2);
+  }catch(err){ out.textContent='Error: '+err; }
+  finally{ btn.disabled=false; btn.textContent=old; }
+}
+</script>
+"""
+
+@app.get("/")
+def index(): return HTML
+
+@app.get("/healthz")
+def healthz(): return jsonify({"ok": True, "ts": time.time()})
+
+@app.get("/api/factor")
+def api_factor():
+    s = request.args.get("n","").strip()
+    try:
+        n = int(s)
+    except Exception:
+        return jsonify({"error":"invalid n"}), 400
+
+    # 0 or missing => infinite
+    timeout_ms = request.args.get("timeout_ms", request.args.get("budget_ms", "0"))
+    try:
+        timeout_ms = int(timeout_ms)
+    except Exception:
+        timeout_ms = 0
+
+    try:
+        max_bits = int(request.args.get("max_bits", DEFAULT_MAX_BITS_FOR_FACTOR))
+    except Exception:
+        return jsonify({"error":"invalid max_bits"}), 400
+
+    max_bits = max(8, min(max_bits, HARD_MAX_BITS))
+    bits = n.bit_length()
+
+    if is_probable_prime(n):
+        return jsonify({
+            "n": n, "n_str": str(n),
+            "classification": "prime",
+            "factors": {str(n): 1},
+            "bits": bits,
+            "params": {"max_bits": max_bits, "timeout_ms": timeout_ms}
+        })
+
+    if bits > max_bits:
+        return jsonify({
+            "n": n, "n_str": str(n),
+            "classification": "composite",
+            "bits": bits,
+            "note": f"too_large_to_factor_interactively (>{max_bits} bits)",
+            "params": {"max_bits": max_bits, "timeout_ms": timeout_ms}
+        })
+
+    fs, err = factor_with_timeout(n, timeout_ms)
+    if fs is None:
+        return jsonify({
+            "n": n, "n_str": str(n),
+            "classification": "composite",
+            "bits": bits,
+            "status": err,
+            "params": {"max_bits": max_bits, "timeout_ms": timeout_ms}
+        })
+
+    return jsonify({
+        "n": n, "n_str": str(n),
+        "classification": "composite",
+        "factors": to_counter_map(fs),
+        "bits": bits,
+        "status": "ok",
+        "params": {"max_bits": max_bits, "timeout_ms": timeout_ms}
+    })
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, threaded=True)

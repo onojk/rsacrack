@@ -1,193 +1,405 @@
 #!/usr/bin/env python3
-import json
-from pathlib import Path
-from flask import Flask, request, send_from_directory, jsonify
-from coil_classifier import (
-    coil_classify, footprint_for_semiprime,
-    geometry_signature, invariant_signature,
+import os, json, random, time, multiprocessing as mp
+from collections import Counter
+from flask import Flask, request, jsonify
+
+from tangent_prime_test import (
+    is_probable_prime, factor,
+    tangent_equal_split_info, tangent_prime_test_split_info,
 )
 
-APP_DIR = Path(__file__).parent.resolve()
-WEB_DIR = APP_DIR / "web"
-CACHE_DIR = APP_DIR / "cache"
-WEB_DIR.mkdir(exist_ok=True)
-CACHE_DIR.mkdir(exist_ok=True)
+DEFAULT_MAX_BITS_FOR_FACTOR = 4096
+HARD_MAX_BITS               = 16384   # keep a sanity ceiling
+app = Flask(__name__)
 
-app = Flask(__name__, static_folder=str(WEB_DIR))
+def _factor_worker(n, q):
+    try:
+        fs = factor(n)
+        q.put(("ok", fs))
+    except Exception as e:
+        q.put(("err", str(e)))
+
+def factor_with_timeout(n: int, timeout_ms: int):
+    # 0 or negative => infinite
+    if timeout_ms and timeout_ms > 0:
+        os.environ["FACTOR_MAX_SECONDS"] = str(max(1, timeout_ms // 1000))
+    else:
+        os.environ["FACTOR_MAX_SECONDS"] = "0"  # infinite
+    q = mp.Queue()
+    p = mp.Process(target=_factor_worker, args=(n, q), daemon=True)
+    p.start()
+    if timeout_ms and timeout_ms > 0:
+        p.join(timeout_ms / 1000.0)
+        if p.is_alive():
+            p.terminate(); p.join()
+            return None, "timeout"
+    else:
+        p.join()  # wait indefinitely
+    if q.empty(): return None, "noresult"
+    tag, payload = q.get()
+    return (payload, None) if tag == "ok" else (None, "error:" + payload)
+
+def to_counter_map(fs):
+    if isinstance(fs, dict):
+        return {str(int(k)): int(v) for k, v in fs.items()}
+    if isinstance(fs, (list, tuple)):
+        fs = [int(x) for x in fs]; fs.sort()
+        return {str(k): int(v) for k, v in Counter(fs).items()}
+    try:
+        return {str(int(fs)): 1}
+    except Exception:
+        return {}
+
+HTML = """<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RSAcrack · Coil & Tangent Tools</title>
+<style>
+ body{font:16px/1.45 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:920px;margin:32px auto;padding:0 16px}
+ .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0}
+ label{display:block;margin:8px 0 4px}
+ input[type=text],input[type=number]{width:100%;max-width:520px;padding:10px;border-radius:10px;border:1px solid #bbb}
+ button{padding:10px 14px;border-radius:10px;border:1px solid #333;background:#111;color:#fff}
+ button[disabled]{opacity:.6}
+ .muted{color:#666}
+</style>
+<h1>RSAcrack · Coil & Tangent Tools</h1>
+<div class="card">
+  <h2>Factor / Classify</h2>
+  <form onsubmit="runFactor(event)">
+    <label>n</label>
+    <input id="n" type="text" placeholder="enter integer"/>
+    <label style="margin-top:10px">timeout_ms (0 = no limit)</label>
+    <input id="t" type="number" min="0" value="0"/>
+    <label style="margin-top:10px">max_bits</label>
+    <input id="b" type="number" min="8" max=\""""+str(HARD_MAX_BITS)+"""\" value=\""""+str(DEFAULT_MAX_BITS_FOR_FACTOR)+"""\"/>
+    <div style="margin-top:10px">
+      <button id="runBtn">Run</button>
+      <span class="muted" id="hint">Interactive factoring up to """+str(DEFAULT_MAX_BITS_FOR_FACTOR)+""" bits. Timeout 0 = unlimited.</span>
+    </div>
+  </form>
+  <pre id="factout" class="muted">Result will appear here…</pre>
+</div>
+<script>
+async function runFactor(e){
+  e.preventDefault();
+  const btn=document.getElementById('runBtn'), out=document.getElementById('factout');
+  const n=document.getElementById('n').value.trim();
+  const t=document.getElementById('t').value.trim();
+  const b=document.getElementById('b').value.trim();
+  btn.disabled=true; const old=btn.textContent; btn.textContent='Working…';
+  out.textContent='Crunching…';
+  try{
+    const url='/api/factor?n='+encodeURIComponent(n)+'&timeout_ms='+encodeURIComponent(t)+'&max_bits='+encodeURIComponent(b);
+    const r=await fetch(url);
+    const j=await r.json();
+    out.textContent=JSON.stringify(j,null,2);
+  }catch(err){ out.textContent='Error: '+err; }
+  finally{ btn.disabled=false; btn.textContent=old; }
+}
+</script>
+"""
 
 @app.get("/")
-def index():
-    return send_from_directory(WEB_DIR, "index.html")
+def index(): return HTML
 
-@app.get("/api/classify")
-def api_classify():
-    try:
-        n = int(request.args.get("n",""))
-    except Exception:
-        return jsonify(error="bad n"), 400
-    r0 = float(request.args.get("r0", 1.0))
-    alpha = float(request.args.get("alpha", 0.0125))
-    beta = float(request.args.get("beta", 0.005))
-    L = float(request.args.get("L", 360.0))
-
-    cls = coil_classify(n)
-    out = {"n": n, "class": cls}
-    if cls == "semiprime":
-        fp = footprint_for_semiprime(n, r0, alpha, beta, L)
-        out.update({
-            "primes": fp["primes"],
-            "normalized": fp["normalized"],
-            "balance": fp["balance"],
-            "bit_gap": fp["bit_gap"],
-            "sig_geom": geometry_signature(n, fp, r0, alpha, beta, L),
-            "sig_invariant": invariant_signature(n, fp),
-        })
-        (CACHE_DIR / f"{out['sig_geom']}.json").write_text(json.dumps(out))
-    return jsonify(out)
-
-if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5001, debug=True)
-
-@app.get("/healthz")
-def healthz():
-    return {"ok": True}
-
-# --- factoring helpers + /api/factor ---
-import math, random, time
-from sympy import isprime
-
-def _is_square(n:int)->bool:
-    if n<0: return False
-    r=math.isqrt(n); return r*r==n
-
-def _trial_division(n:int, bound:int=100000):
-    # try small primes via wheel-ish stepping; cheap screen before heavier algos
-    if n%2==0: return 2
-    if n%3==0: return 3
-    f=5
-    while f<=bound and f*f<=n:
-        if n%f==0: return f
-        if n%(f+2)==0: return f+2
-        f += 6
-    return None
-
-def _fermat(n:int, max_steps:int=2_000_000):
-    # works best if p≈q; O(|p-q|)
-    if n%2==0: return 2
-    a=math.isqrt(n)
-    if a*a<n: a+=1
-    for _ in range(max_steps):
-        b2=a*a-n
-        if _is_square(b2):
-            b=math.isqrt(b2)
-            x=a-b
-            if 1<x<n and n%x==0: return x
-        a+=1
-    return None
-
-def _pollard_rho_brent(n:int, max_rounds:int=50):
-    if n%2==0: return 2
-    if isprime(n): return n
-    for _ in range(max_rounds):
-        y = random.randrange(1, n-1)
-        c = random.randrange(1, n-1)
-        m = random.randrange(1, n-1) or 1
-        g, r, q = 1, 1, 1
-        while g==1:
-            x=y
-            for __ in range(r):
-                y=(pow(y,2,n)+c)%n
-            k=0
-            while k<r and g==1:
-                ys=y
-                for __ in range(min(m, r-k)):
-                    y=(pow(y,2,n)+c)%n
-                    q=(q*abs(x-y))%n
-                g=math.gcd(q,n)
-                k+=m
-            r*=2
-        if g==n:
-            g=1
-            while g==1:
-                ys=(pow(ys,2,n)+c)%n
-                g=math.gcd(abs(x-ys), n)
-        if 1<g<n:
-            return g
-    return None
+# (commented duplicate /healthz block removed)
 
 @app.get("/api/factor")
 def api_factor():
+    s = request.args.get("n","").strip()
     try:
-        n = int(request.args.get("n",""))
+        n = int(s)
     except Exception:
-        return jsonify(error="bad n"), 400
+        return jsonify({"error":"invalid n"}), 400
 
-    t0 = time.monotonic()
-    method = None
-    p = None
+    # 0 or missing => infinite
+    timeout_ms = request.args.get("timeout_ms", request.args.get("budget_ms", "0"))
+    try:
+        timeout_ms = int(timeout_ms)
+    except Exception:
+        timeout_ms = 0
 
-    # trivial / quick paths
-    if n<=1:
-        dt = (time.monotonic()-t0)*1000
-        return jsonify(n=n, class_="invalid", ms=dt)
-    if n%2==0:
-        method="even"; p=2
-    elif isprime(n):
-        method="prime"
-        dt=(time.monotonic()-t0)*1000
-        return jsonify(n=n, class_="prime", ms=dt)
-    elif _is_square(n):
-        r=math.isqrt(n)
-        if isprime(r):
-            method="square_of_prime"
-            dt=(time.monotonic()-t0)*1000
-            return jsonify(n=n, class_="semiprime", factors=[r,r], method=method, ms=dt)
-        # fallthrough if not square of prime
+    try:
+        max_bits = int(request.args.get("max_bits", DEFAULT_MAX_BITS_FOR_FACTOR))
+    except Exception:
+        return jsonify({"error":"invalid max_bits"}), 400
 
-    # small-prime screen
-    if p is None:
-        p = _trial_division(n, bound=int(request.args.get("trial", "100000")))
-        if p: method = "trial"
+    max_bits = max(8, min(max_bits, HARD_MAX_BITS))
+    bits = n.bit_length()
 
-    # Fermat (good for RSA-like near-balanced)
-    if p is None:
-        p = _fermat(n, max_steps=int(request.args.get("fermat", "2000000")))
-        if p: method = "fermat"
-
-    # Pollard ρ (Brent) fallback
-    if p is None:
-        p = _pollard_rho_brent(n, max_rounds=int(request.args.get("rho", "60")))
-        if p: method = "rho_brent"
-
-    dt = (time.monotonic()-t0)*1000
-
-    if not p:
-        # unknown / composite with >2 primes or hard instance
-        return jsonify(n=n, class_="unknown", ms=dt, method=method or "none")
-
-    q = n // p
-    if p*q != n:
-        return jsonify(n=n, class_="other", ms=dt, method=method)
-
-    # order
-    p, q = (int(p), int(q)) if p<=q else (int(q), int(p))
-
-    # classify and (if semiprime) attach your coil footprint + signatures
-    cls = coil_classify(n)
-    resp = {"n": n, "class": cls, "factors": [p,q], "method": method, "ms": dt}
-    if cls=="semiprime":
-        r0 = float(request.args.get("r0", 1.0))
-        alpha = float(request.args.get("alpha", 0.0125))
-        beta = float(request.args.get("beta", 0.005))
-        L = float(request.args.get("L", 360.0))
-        fp = footprint_for_semiprime(n, r0, alpha, beta, L)
-        resp.update({
-            "footprint": {
-                "normalized": fp["normalized"],
-                "balance": fp["balance"],
-                "bit_gap": fp["bit_gap"],
-            },
-            "sig_geom": geometry_signature(n, fp, r0, alpha, beta, L),
-            "sig_invariant": invariant_signature(n, fp),
+    if is_probable_prime(n):
+        return jsonify({
+            "n": n, "n_str": str(n),
+            "classification": "prime",
+            "factors": {str(n): 1},
+            "bits": bits,
+            "params": {"max_bits": max_bits, "timeout_ms": timeout_ms}
         })
-    return jsonify(resp)
+
+    if bits > max_bits:
+        return jsonify({
+            "n": n, "n_str": str(n),
+            "classification": "composite",
+            "bits": bits,
+            "note": f"too_large_to_factor_interactively (>{max_bits} bits)",
+            "params": {"max_bits": max_bits, "timeout_ms": timeout_ms}
+        })
+
+    fs, err = factor_with_timeout(n, timeout_ms)
+    if fs is None:
+        return jsonify({
+            "n": n, "n_str": str(n),
+            "classification": "composite",
+            "bits": bits,
+            "status": err,
+            "params": {"max_bits": max_bits, "timeout_ms": timeout_ms}
+        })
+
+    return jsonify({
+        "n": n, "n_str": str(n),
+        "classification": "composite",
+        "factors": to_counter_map(fs),
+        "bits": bits,
+        "status": "ok",
+        "params": {"max_bits": max_bits, "timeout_ms": timeout_ms}
+    })
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, threaded=True)
+
+# ---- Lotto API endpoints (added) ----
+try:
+    import time
+    from flask import request, jsonify
+    from lotto_factor import factor_lotto_64
+
+    def _factor_core(n: int, budget_ms: int|None):
+        t0 = time.perf_counter()
+        res = factor_lotto_64(n, budget_ms=budget_ms)
+        dt_ms = int((time.perf_counter() - t0) * 1000)
+        if res is None:
+            return {"ok": True, "n": str(n), "duration_ms": dt_ms, "result": "none"}
+        p, q = res
+        if q == 1:
+            return {"ok": True, "n": str(n), "duration_ms": dt_ms, "result": "prime", "p": str(p)}
+        return {"ok": True, "n": str(n), "duration_ms": dt_ms, "result": "factors", "p": str(p), "q": str(q)}
+
+    @app.get("/api/factor")
+    def api_factor_query():
+        n_str = request.args.get("n", "").strip()
+        t_str = request.args.get("timeout_ms", "").strip()
+        if not n_str:
+            return jsonify({"error":"missing n"}), 400
+        try:
+            n = int(n_str)
+        except:
+            return jsonify({"error":"n must be integer"}), 400
+        budget_ms = None
+        if t_str and t_str != "0":
+            try:
+                budget_ms = int(t_str)
+            except:
+                return jsonify({"error":"timeout_ms must be integer"}), 400
+        if n < 0 or n > 0xFFFFFFFFFFFFFFFF:
+            return jsonify({"error":"n must be 64-bit unsigned"}), 400
+        return jsonify(_factor_core(n, budget_ms))
+
+    @app.post("/api/lotto_factor")
+    def api_lotto_factor():
+        try:
+            data = request.get_json(force=True, silent=False)
+            n = int(data.get("n"))
+            budget_ms = data.get("budget_ms")
+            if budget_ms is not None:
+                budget_ms = int(budget_ms)
+        except Exception as e:
+            return jsonify({"error": f"invalid payload: {e}"}), 400
+        if n < 0 or n > 0xFFFFFFFFFFFFFFFF:
+            return jsonify({"error":"n must be 64-bit unsigned"}), 400
+        return jsonify(_factor_core(n, budget_ms))
+except Exception as _e:
+    # Keep the rest of app_demo working even if lotto imports are missing
+    pass
+
+# ---- Lotto API endpoints (added) ----
+try:
+    import time
+    from flask import request, jsonify
+    from lotto_factor import factor_lotto_64
+
+    def _factor_core(n: int, budget_ms: int|None):
+        t0 = time.perf_counter()
+        res = factor_lotto_64(n, budget_ms=budget_ms)
+        dt_ms = int((time.perf_counter() - t0) * 1000)
+        if res is None:
+            return {"ok": True, "n": str(n), "duration_ms": dt_ms, "result": "none"}
+        p, q = res
+        if q == 1:
+            return {"ok": True, "n": str(n), "duration_ms": dt_ms, "result": "prime", "p": str(p)}
+        return {"ok": True, "n": str(n), "duration_ms": dt_ms, "result": "factors", "p": str(p), "q": str(q)}
+
+    @app.get("/api/factor")
+    def api_factor_query():
+        n_str = request.args.get("n", "").strip()
+        t_str = request.args.get("timeout_ms", "").strip()
+        if not n_str:
+            return jsonify({"error":"missing n"}), 400
+        try:
+            n = int(n_str)
+        except:
+            return jsonify({"error":"n must be integer"}), 400
+        budget_ms = None
+        if t_str and t_str != "0":
+            try:
+                budget_ms = int(t_str)
+            except:
+                return jsonify({"error":"timeout_ms must be integer"}), 400
+        if n < 0 or n > 0xFFFFFFFFFFFFFFFF:
+            return jsonify({"error":"n must be 64-bit unsigned"}), 400
+        return jsonify(_factor_core(n, budget_ms))
+
+    @app.post("/api/lotto_factor")
+    def api_lotto_factor():
+        try:
+            data = request.get_json(force=True, silent=False)
+            n = int(data.get("n"))
+            budget_ms = data.get("budget_ms")
+            if budget_ms is not None:
+                budget_ms = int(budget_ms)
+        except Exception as e:
+            return jsonify({"error": f"invalid payload: {e}"}), 400
+        if n < 0 or n > 0xFFFFFFFFFFFFFFFF:
+            return jsonify({"error":"n must be 64-bit unsigned"}), 400
+        return jsonify(_factor_core(n, budget_ms))
+except Exception as _e:
+    # Keep the rest of app_demo working even if lotto imports are missing
+    pass
+
+# --- serve the new combined UI (classic + auto-lotto) ---
+from flask import send_from_directory
+@app.get("/ui")
+def _new_ui():
+    return send_from_directory("web/static", "index.html")
+
+
+# --- Generic API proxy to Node (:3000) ---
+from flask import request, Response, jsonify
+import requests as _rq
+
+@app.route('/api/<path:path>', methods=['GET','POST','PUT','DELETE','PATCH','OPTIONS'])
+def api_proxy(path):
+    try:
+        url = f'http://127.0.0.1:3000/api/{path}'
+        resp = _rq.request(
+            method=request.method,
+            url=url,
+            params=request.args,
+            data=request.get_data(),
+            headers={k:v for k,v in request.headers.items()
+                     if k.lower() in ('content-type','accept','authorization')},
+            timeout=300
+        )
+        drop = {'content-encoding','transfer-encoding','connection'}
+        hdrs = [(k,v) for k,v in resp.headers.items() if k.lower() not in drop]
+        return Response(resp.content, resp.status_code, headers=hdrs)
+    except Exception as e:
+        return jsonify(ok=False, error=f'proxy error: {e}'), 502
+
+# (commented duplicate /api/health block removed)
+
+# (commented duplicate /healthz block removed)
+
+# === Safe route registration (idempotent, avoids duplicate endpoint errors) ===
+def _register_once():
+    from flask import jsonify
+    # /healthz — plain text, used by Nginx and uptime checks
+    if 'healthz' not in app.view_functions:
+        app.add_url_rule(
+            '/healthz',
+            endpoint='healthz',
+            view_func=lambda: ("ok", 200, {"Content-Type": "text/plain; charset=utf-8"})
+        )
+    # /api/health — JSON for the UI badge
+    if 'api_health' not in app.view_functions:
+        app.add_url_rule(
+            '/api/health',
+            endpoint='api_health',
+            view_func=lambda: jsonify(ok=True, service="rsacrack", version="ui-refresh-1")
+        )
+
+_register_once()
+
+# === Classic Factor & Classify (JSON; idempotent registration) ===
+from flask import request, jsonify
+
+def _parse_n(param='n'):
+    n_raw = (request.args.get(param) or '').strip()
+    if not n_raw:
+        raise ValueError("missing query param 'n'")
+    if n_raw.lower().startswith('0x'):
+        return int(n_raw, 16)
+    return int(n_raw)
+
+def _factor_sympy(n):
+    try:
+        import sympy as sp
+        f = sp.factorint(n, limit=1_000_000)
+        # Return a nontrivial factor pair if possible
+        if len(f) == 1 and list(f.values())[0] == 1:
+            # prime
+            return None
+        # choose smallest prime factor
+        p = min(f.keys())
+        if p not in (1, n) and n % p == 0:
+            return (p, n // p)
+    except Exception:
+        pass
+    return None
+
+def _api_factor_impl():
+    n = _parse_n()
+    # If your app defines a built-in factor(n), prefer it:
+    p = q = None
+    try:
+        if 'factor' in globals() and callable(globals()['factor']):
+            res = globals()['factor'](n)
+            if isinstance(res, (list, tuple)) and len(res) == 2:
+                p, q = int(res[0]), int(res[1])
+    except Exception:
+        p = q = None
+    if p is None or q is None:
+        fq = _factor_sympy(n)
+        if fq is not None:
+            p, q = fq
+    if p is not None and q is not None:
+        return jsonify(ok=True, n=str(n), p=str(int(p)), q=str(int(q)), result="factors")
+    return jsonify(ok=False, n=str(n), result="unknown")
+
+def _api_classify_impl():
+    n = _parse_n()
+    try:
+        import sympy as sp
+        if sp.isprime(n):
+            return jsonify(ok=True, n=str(n), type="prime")
+        f = sp.factorint(n, limit=1_000_000)
+        if len(f) == 2 and all(exp == 1 for exp in f.values()):
+            ps = sorted(f.keys())
+            return jsonify(ok=True, n=str(n), type="semiprime", p=str(ps[0]), q=str(ps[1]))
+        return jsonify(ok=True, n=str(n), type="composite", factor_count=len(f))
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 400
+
+# Register once (so repeated patches don't collide)
+if 'api_factor' not in app.view_functions:
+    app.add_url_rule('/api/factor', endpoint='api_factor',
+                     view_func=lambda: (_api_json_guard(_api_factor_impl)))
+
+if 'api_classify' not in app.view_functions:
+    app.add_url_rule('/api/classify', endpoint='api_classify',
+                     view_func=lambda: (_api_json_guard(_api_classify_impl)))
+
+# Small guard to ensure JSON even on exceptions
+def _api_json_guard(fn):
+    try:
+        return fn()
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 400

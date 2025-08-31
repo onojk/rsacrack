@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.bak.*
+*.bad.*
+.cache/
+cache/
+*.csv
+.git
+.gitignore

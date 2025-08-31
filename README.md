@@ -1,197 +1,416 @@
 # RSAcrack
 
-**RSAcrack** explores a geometric/visual model for integers using a 3D **conical coil** and simple numerical fingerprints to quickly classify numbers (prime / semiprime / other) and surface helpful diagnostics.
+RSAcrack is a tiny Flask + Gunicorn service for exploring prime and semiprime detection and **quick factoring** using:
 
-- Live site: **https://rsacrack.com**
-- API root: **`/api/classify?n=...`**
+* Small **trial division** (cheap screen, up to ≈1e7)
+* **Pollard’s Rho (Brent)** with a time budget
+* Lightweight **geometric classification** helpers (for viz/demo)
 
----
-
-## 📖 Overview
-
-We place the natural numbers along a 3D **conical spring (coil)**. At primes the “prime-only coil” and the “all-integers coil” are tangent. This intuition motivates quick fingerprints:
-
-- **Classify:** `prime`, `semiprime`, or `other` (unknown/not tested)
-- **Dots ≈ τ(n):** number of divisors (the “flattened coil tangencies” idea)
-- **Semiprime extras:** factor pair, normalized footprint features, and simple signatures
-
-> We do **not** claim cryptographic breakthroughs here; this is an experiment in visualization + heuristics with clear limits.
+This is a research/educational project — **not** a replacement for industrial-strength factorization or cryptanalysis.
 
 ---
 
-## 🚀 Features
-
-- ⚙️ **REST API**: `/api/classify` and `/api/factor`
-- 🖥 **Web UI**: interactive canvas + **Results** panel (shows class, dots, status, factors if semiprime)
-- 🧠 **Why this works**: inline explanation panel tied to each result
-- 🔎 **Semiprime footprint** (for small/medium `n`) with normalized features & signatures
-- 🧪 **Test gallery** (below) with known values across types
-
----
-
-## 🕹 Quick Start (local dev)
+## Quick start (local)
 
 ```bash
 git clone https://github.com/onojk/rsacrack.git
 cd rsacrack
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade -r requirements.txt
+# Dev run
+python app_demo.py --host 127.0.0.1 --port 8001 --debug
+```
 
-# (optional) venv
-python3 -m venv rsacrack-venv
-source rsacrack-venv/bin/activate
+Hit:
 
-pip install -r requirements.txt
+```
+http://127.0.0.1:8001/healthz
+http://127.0.0.1:8001/api/version
+```
 
-# Run dev server (defaults HOST=127.0.0.1 PORT=8001)
-python app_demo.py --debug
-# open http://127.0.0.1:8001
+---
 
-Systemd / Gunicorn (prod)
+## API
 
-A helper script is included:
+### `GET /healthz`
 
-# from repo root
-chmod +x manage_rsacrack.sh
+Simple health probe.
 
-# Restart service cleanly and verify
-./manage_rsacrack.sh
+**200 OK** → `ok`
 
-# Status only
-./manage_rsacrack.sh --status
+---
 
-# Dev run on another port (stops service first)
-./manage_rsacrack.sh --dev 5000
+### `GET /api/version`
 
-Health checks:
+Service metadata.
 
-curl -sS http://127.0.0.1:8001/healthz && echo
-curl -sS https://rsacrack.com/healthz && echo
+**Example**
 
-🌐 Web UI
+```bash
+curl -sS https://rsacrack.com/api/version | jq .
+```
 
-Open https://rsacrack.com.
-Controls:
+**Response**
 
-    n – number to classify
+```json
+{
+  "name": "rsacrack",
+  "version": "2025-08-23",
+  "methods": ["trial", "rho"],
+  "limits": { "digits_max": 200, "budget_ms": [500, 10000] }
+}
+```
 
-    Coil render params: r0, alpha, beta, L (optional)
+---
 
-    Classify + Render button runs /api/classify and updates:
+### `GET /api/classify`
 
-        Badge with prime/semiprime/unknown (color hints)
+Classify an integer as `prime | semiprime | other` and (for semiprimes) include geometry/invariant signatures.
 
-        Results JSON (pretty)
+**Query params**
 
-        Why this works panel (expanded by default)
-        Includes: n_str, tested class, divisor dots (τ(n)), suspected class from dots, and JS-safety.
+* `n` (required, integer or numeric string)
+* `r0` (float, default 1.0)
+* `alpha` (float, default 0.0125)
+* `beta` (float, default 0.005)
+* `L` (float, default 360)
 
-    Tip: hard refresh to bust cache if you edit the UI: Ctrl+Shift+R (Cmd+Shift+R on macOS).
+**Examples**
 
-🧭 API
-GET /api/classify?n=... (plus optional r0, alpha, beta, L)
+```bash
+curl -sS "https://rsacrack.com/api/classify?n=91" | jq .
+curl -sS "https://rsacrack.com/api/classify?n=2147483647" | jq .
+```
 
-Response (fields may vary by class):
+**Typical response (semiprime)**
 
+```json
 {
   "n": 91,
-  "n_str": "91",
-  "n_js_safe": true,           // true if |n| <= 2^53-1 and digits-only
-  "class": "semiprime",        // "prime" | "semiprime" | "other"
-  "prime_status": "91 is NOT prime (semiprime)",
-  "tested": true,              // true for prime/semiprime/composite; false if unknown
-  "dots": 4,                   // τ(n), computed exactly up to 1e12; null above
-  "suspected": "composite",    // from τ(n): 1=special, 2=prime, >2=composite
-  "primes": [7, 13],           // present for semiprime
-  "normalized": {...},         // semiprime footprint features (if available)
-  "balance": 0.62,
+  "class": "semiprime",
+  "primes": [7, 13],
+  "normalized": {"f1": 0.8894, "f2": 0.0566, "f3": 0.0540},
+  "balance": 0.6289,
   "bit_gap": 1,
-  "sig_geom": "...",           // optional geometry-aware signature
-  "sig_invariant": "..."       // optional invariant signature
+  "per_step_slopes": {"s1": 0.0288, "s2": 0.0238, "s3": 0.0227},
+  "sig_geom": "…",
+  "sig_invariant": "…",
+  "n_str": "91",
+  "prime_status": "91 is NOT prime (semiprime)",
+  "tested": true,
+  "n_js_safe": true,
+  "dots": 4,
+  "suspected": "composite"
+}
+```
+
+---
+
+### `GET /api/factor`
+
+Attempt to factor an integer quickly. The server:
+
+1. runs **small trial division** (≤ \~1e7)
+2. if needed, runs **Pollard Rho (Brent)** with a **time budget**
+3. if not factored within budget, returns `"class": "other"`
+
+**Query params**
+
+* `n` (required, **decimal string**; `+` sign allowed; max **200 digits**)
+* `budget_ms` (optional, default **2000**; min **500**, max **10000**)
+
+**Examples**
+
+```bash
+# tiny semiprime → trial
+curl -sS "https://rsacrack.com/api/factor?n=15" | jq .
+
+# mixed (one small, one big) → still trial
+curl -sS "https://rsacrack.com/api/factor?n=$((65537*2147483647))" | jq .
+
+# both primes > 1e7 (needs rho); may require ~2-4s
+curl -sS "https://rsacrack.com/api/factor?n=110000479000513&budget_ms=4000" | jq .
+```
+
+**Responses**
+
+* Semiprime (trial):
+
+```json
+{
+  "class": "semiprime",
+  "n": 15,
+  "factors": [3, 5],
+  "method": "trial",
+  "ms": 0.01
+}
+```
+
+* Semiprime (rho):
+
+```json
+{
+  "class": "semiprime",
+  "n": 110000479000513,
+  "factors": [10000019, 11000027],
+  "method": "rho",
+  "ms": 2930.0
+}
+```
+
+* Prime:
+
+```json
+{ "class": "prime", "n": 2147483647, "ms": 0.12 }
+```
+
+* Not factored in time:
+
+```json
+{
+  "class": "other",
+  "n": 12345678910111213141516,
+  "factors": [],
+  "method": "trial+rho_timeout",
+  "ms": 2000.0
+}
+```
+
+**Errors**
+
+* `400` — `{"error":"n must be a non-negative integer string"}`
+* `413` — `{"error":"n too large (max 200 digits)"}`
+* `429` — `{"error":"too many requests"}` (simple in-process rate limit)
+
+---
+
+## Limits & Notes
+
+* `n` must be a **non-negative integer string** (no spaces/commas).
+* Size cap: **200 digits** (\~665 bits) to protect memory/CPU.
+* `budget_ms`: 500–10000 (ms). More time → better chance for hard composites.
+* Rho is probabilistic; repeated tries may succeed where one fails.
+* **Not** suitable for real-world RSA key recovery or adversarial use.
+
+---
+
+## Performance Tips
+
+* “Easy” semiprimes (one small factor) are instant via trial.
+* Harder \~10–14 digit semiprimes with two \~1e7 factors often succeed in <4 s.
+* For much larger composites, expect `"other"` unless a small factor exists.
+
+---
+
+## Deployment (what this site uses)
+
+### 1) System packages
+
+```bash
+sudo apt update
+sudo apt install -y python3-venv nginx certbot python3-certbot-nginx jq
+```
+
+### 2) App setup
+
+```bash
+cd /home/<USER>/rsacrack
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+deactivate
+```
+
+### 3) Gunicorn via systemd
+
+Create `/etc/systemd/system/rsacrack.service`:
+
+```ini
+[Unit]
+Description=RSAcrack Flask via Gunicorn
+After=network.target
+
+[Service]
+User=<USER>
+Group=www-data
+WorkingDirectory=/home/<USER>/rsacrack
+Environment="PATH=/home/<USER>/rsacrack/.venv/bin"
+Environment="HOST=0.0.0.0" "PORT=8080"
+ExecStart=/home/<USER>/rsacrack/.venv/bin/gunicorn \
+  -w 2 -k gthread --threads 4 --timeout 120 \
+  -b 0.0.0.0:8080 app_demo:app
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now rsacrack
+sudo systemctl status rsacrack --no-pager
+```
+
+### 4) Nginx reverse proxy + HTTPS
+
+Site config `/etc/nginx/sites-available/rsacrack`:
+
+```nginx
+server {
+    listen 80;
+    server_name rsacrack.com www.rsacrack.com;
+    return 301 https://$host$request_uri;
 }
 
-GET /api/factor?n=... (small trial)
+server {
+    listen 443 ssl http2;
+    server_name rsacrack.com www.rsacrack.com;
 
-    Quickly detects prime or semiprime by tiny trial division; returns "other" if inconclusive.
+    ssl_certificate /etc/letsencrypt/live/rsacrack.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/rsacrack.com/privkey.pem;
 
-🧪 Test Gallery
+    # Security headers (also see conf.d/*.conf below)
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
 
-Try these known values in the UI or with curl:
-n	Type	τ(n) (dots)	Notes / Factors
-1	Special	1	unique, not prime
-2	Prime	2	smallest prime
-3	Prime	2	prime
-4	Composite	3	2×2 (square)
-6	Semiprime	4	2×3
-15	Semiprime	4	3×5
-91	Semiprime	4	7×13 (good demo)
-899	Semiprime	4	29×31
-104729	Prime	2	10000th prime
-2310	Composite	32	2×3×5×7×11
-360360	Composite	192	2×3×5×7×11×13 (very rich)
-10403	Semiprime	4	101×103
-19879	Prime	2	larger prime
-999983	Prime	2	largest 6-digit prime
-1000003	Prime	2	~1e6 range prime
-10^40	Other	—	τ(n) not computed above 1e12; UI shows unknown
-10000000000000000000000000000000000000061	Other	—	large; unknown
+    # Static UI (optional)
+    location /web/ {
+        alias /home/<USER>/rsacrack/web/;
+        access_log off;
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800" always;
+        try_files $uri =404;
+    }
 
-Examples:
+    # App
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+    }
+}
+```
 
-# semiprime
-curl -sS "https://rsacrack.com/api/classify?n=91" | jq
+Enable & test:
 
-# prime
-curl -sS "https://rsacrack.com/api/classify?n=104729" | jq
+```bash
+sudo ln -sf /etc/nginx/sites-available/rsacrack /etc/nginx/sites-enabled/rsacrack
+sudo nginx -t && sudo systemctl reload nginx
+```
 
-# highly composite
-curl -sS "https://rsacrack.com/api/classify?n=360360" | jq
+Optional HSTS (global): `/etc/nginx/conf.d/hsts.conf`
 
-🧩 Why this works (intuition)
+```nginx
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+```
 
-    Define dots = τ(n), the number of positive divisors of n.
+### 5) Let’s Encrypt
 
-    In the “flattened coil” picture, each divisor corresponds to a “tangent hit.” Counting hits ≈ counting divisors.
+```bash
+sudo certbot --nginx -d rsacrack.com -d www.rsacrack.com
+# Reinstall existing cert if prompted, or renew & replace.
+# Auto-renew is handled by systemd timers: `systemctl list-timers | grep certbot`
+```
 
-Consequences
+### 6) GCP firewall (if on GCE)
 
-    τ(1) = 1 → special (only 1 divides 1)
+* Make sure instance has tags `http-server, https-server` (or your custom ones).
+* Open ports 80/443 (or 8080 if you expose it directly).
 
-    τ(n) = 2 → prime (divisors are {1, n})
+```bash
+# login as your user; follow browser flow
+gcloud auth login --update-adc
+gcloud config set project <PROJECT_ID>
 
-    τ(n) = 4 → typical semiprime (divisors {1, p, q, pq})
+# Built-ins (if present in your project)
+gcloud compute instances add-tags <INSTANCE_NAME> \
+  --zone=<ZONE> --tags=http-server,https-server
 
-    τ(n) > 2 → composite
+# Or custom rule for 8080
+gcloud compute firewall-rules create allow-rsacrack-8080 \
+  --allow=tcp:8080 --direction=INGRESS --priority=1000 \
+  --network=default --target-tags=rsacrack --source-ranges=0.0.0.0/0
+gcloud compute instances add-tags <INSTANCE_NAME> \
+  --zone=<ZONE> --tags=rsacrack
+```
 
-Limits
+---
 
-    We compute τ(n) exactly up to 10¹². Above that we report unknown for dots and avoid misleading float output by returning n_str and n_js_safe.
+## Operations
 
-🧱 Project Layout
+**Logs**
 
-rsacrack/
-├─ app_demo.py            # Flask app (web + API)
-├─ manage_rsacrack.sh     # restart/status/dev helpers for systemd+gunicorn
-├─ web/
-│  └─ index.html          # UI (canvas + results + “Why this works”)
-├─ coil_classifier.py     # classification and footprint helpers
-├─ whitepaper/rsacrack_whitepaper.pdf
-└─ requirements.txt
+```bash
+journalctl -u rsacrack -n 100 --no-pager
+```
 
-🔒 Ethics & Scope
+**Reload after code changes**
 
-    Educational and experimental.
+```bash
+sudo systemctl restart rsacrack
+sudo systemctl reload nginx
+```
 
-    Only small/medium toy examples; not intended for real cryptographic key recovery.
+**Sanity**
 
-    Please use responsibly and legally.
+```bash
+curl -sS https://rsacrack.com/healthz
+curl -sS https://rsacrack.com/api/version | jq .
+```
 
-🤝 Contributing
+---
 
-Issues and PRs welcome! Ideas:
+## Repo hygiene
 
-    Better large-n heuristics for τ(n)
+* `.gitignore` excludes: `__pycache__/`, `.venv/`, `*.bak.*`, `*.bad.*`, `cache/`, `*.csv`
+* Backups land in `backups/` (optional).
+* `requirements.txt` pinned via `pip freeze` (already generated on the server).
 
-    Alternative coil parametrizations
+---
 
-    Stronger semiprime footprint features
+## Security considerations
 
-    UI polish & accessibility
+* Input is **string-parsed** and validated; `n` limited to **200 digits**.
+* Simple per-worker **token-bucket rate limit** in `/api/factor` (429 on burst).
+* Nginx adds conservative **security headers**; enable **HSTS** in prod.
+* This service is **not** designed for adversarial workloads.
+
+---
+
+## License & Acknowledgments
+
+* See [LICENSE](LICENSE).
+* Thanks to the community work on Miller–Rabin and Pollard’s Rho (Brent variant).
+
+---
+
+## Examples (copy-paste)
+
+```bash
+# Health & version
+curl -sS https://rsacrack.com/healthz && echo
+curl -sS https://rsacrack.com/api/version | jq .
+
+# Classification
+curl -sS "https://rsacrack.com/api/classify?n=91" | jq .
+
+# Factoring
+curl -sS "https://rsacrack.com/api/factor?n=15" | jq .
+curl -sS "https://rsacrack.com/api/factor?n=110000479000513&budget_ms=4000" | jq .
+```
+
+---
+
+Happy hacking 👋

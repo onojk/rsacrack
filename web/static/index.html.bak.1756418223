@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RSAcrack · Coil & Tangent Tools</title>
+<style>
+  :root{
+    --fg:#111; --bg:#fff; --muted:#667085; --border:#e5e7eb;
+    --accent:#111; --btnfg:#fff;
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .container{max-width:960px;margin:32px auto;padding:0 16px}
+  h1{font-size:28px;margin:0 0 18px}
+  h2{font-size:20px;margin:0 0 12px}
+  h3{font-size:16px;margin:16px 0 8px}
+  .card{border:1px solid var(--border);border-radius:14px;padding:16px;margin:14px 0;background:#fff}
+  label{display:block;font-weight:600;margin:6px 0 6px}
+  input[type=text],input[type=number]{width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;outline:none}
+  input[type=text]:focus,input[type=number]:focus{border-color:#94a3b8;box-shadow:0 0 0 3px rgba(148,163,184,.2)}
+  .row{display:grid;grid-template-columns:1fr;gap:12px}
+  @media (min-width: 760px){ .row.two{grid-template-columns:1fr 1fr} }
+
+  .muted{color:var(--muted);font-size:14px}
+  .switchline{display:flex;align-items:center;gap:8px;margin-top:4px}
+  button{padding:10px 14px;border-radius:10px;border:1px solid var(--accent);background:var(--accent);color:var(--btnfg);cursor:pointer}
+  button[disabled]{opacity:.6;cursor:default}
+  pre{background:#0b0b0c;color:#e5e7eb;border-radius:10px;padding:10px 12px;overflow:auto;max-height:240px}
+  code{background:#f3f4f6;border:1px solid #e5e7eb;border-radius:6px;padding:2px 6px}
+  .result{background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:8px 10px}
+  .result h4{margin:0 0 6px;font-size:14px;color:#334155}
+</style>
+
+<body>
+  <div class="container">
+    <h1>RSAcrack · Coil &amp; Tangent Tools</h1>
+
+    <!-- CLASSIC + AUTO LOTTO -->
+    <div class="card">
+      <h2>Classic Factor / Classify</h2>
+      <form onsubmit="runClassic(event)">
+        <label for="n_classic">n</label>
+        <input id="n_classic" type="text" placeholder="enter integer">
+
+        <div class="row two">
+          <div>
+            <label for="t_classic">timeout_ms (0 = no limit)</label>
+            <input id="t_classic" type="number" min="0" value="0">
+          </div>
+          <div>
+            <label for="b_classic">max_bits</label>
+            <input id="b_classic" type="number" min="8" max="16384" value="4096">
+          </div>
+        </div>
+
+        <div class="row two">
+          <div class="switchline">
+            <input id="also_lotto" type="checkbox" checked>
+            <label for="also_lotto" style="margin:0;font-weight:500">also try Fail-fast Lotto (64-bit)</label>
+          </div>
+          <div>
+            <label for="budget_lotto_auto">lotto budget_ms (optional)</label>
+            <input id="budget_lotto_auto" type="number" min="50" step="50" placeholder="auto by bit-length">
+          </div>
+        </div>
+
+        <div style="margin-top:8px">
+          <button id="btn_classic">Run</button>
+          <span class="muted" style="margin-left:8px">Classic uses <code>GET /api/factor</code>.</span>
+        </div>
+      </form>
+
+      <div class="result" style="margin-top:14px">
+        <h4>Classic result</h4>
+        <pre id="out_classic">—</pre>
+      </div>
+
+      <div class="result" style="margin-top:10px">
+        <h4>Lotto result (auto)</h4>
+        <pre id="out_lotto_auto">—</pre>
+      </div>
+    </div>
+
+    <!-- MANUAL LOTTO -->
+    <div class="card">
+      <h2>Fail-fast Lotto (manual, 64-bit)</h2>
+      <form onsubmit="runLotto(event)">
+        <label for="n_lotto">n (0..2^64-1)</label>
+        <input id="n_lotto" type="text" placeholder="e.g. 1000036000099">
+
+        <label for="budget_lotto" style="margin-top:10px">budget_ms (overall time budget)</label>
+        <input id="budget_lotto" type="number" min="50" step="50" placeholder="auto by bit-length">
+
+        <div style="margin-top:10px">
+          <button id="btn_lotto">Run Lotto</button>
+          <span class="muted" style="margin-left:8px">POST <code>/api/lotto_factor</code> → server runs Cprime shards.</span>
+        </div>
+      </form>
+
+      <div class="result" style="margin-top:10px">
+        <h4>Lotto result</h4>
+        <pre id="out_lotto">—</pre>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const fmt = j => { try{ return JSON.stringify(j,null,2); }catch{ return String(j); } };
+
+  async function runClassic(e){
+    e.preventDefault();
+    const btn = document.getElementById('btn_classic');
+    const outClassic = document.getElementById('out_classic');
+    const outLotto = document.getElementById('out_lotto_auto');
+
+    const n = document.getElementById('n_classic').value.trim();
+    const t = document.getElementById('t_classic').value.trim();
+    const b = document.getElementById('b_classic').value.trim();
+    const also = document.getElementById('also_lotto').checked;
+    const budgetStr = document.getElementById('budget_lotto_auto').value.trim();
+
+    if(!n){ outClassic.textContent = 'Error: enter an integer n'; return; }
+    btn.disabled = true; const old = btn.textContent; btn.textContent='Working…';
+    outClassic.textContent='Classic: crunching…';
+    outLotto.textContent = also ? 'Lotto: working…' : 'Lotto: (disabled)';
+
+    // fire both in parallel
+    const classicPromise = (async () => {
+      const url = '/api/factor?n='+encodeURIComponent(n)+'&timeout_ms='+encodeURIComponent(t)+'&max_bits='+encodeURIComponent(b);
+      const r = await fetch(url);
+      const j = await r.json();
+      outClassic.textContent = fmt(j);
+    })().catch(err => { outClassic.textContent = 'Classic error: '+err; });
+
+    const lottoPromise = (!also ? Promise.resolve() : (async () => {
+      const payload = { n }; if (budgetStr) payload.budget_ms = Number(budgetStr);
+      const r = await fetch('/api/lotto_factor', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+      });
+      if(!r.ok){ const txt=await r.text(); throw new Error(txt || ('HTTP '+r.status)); }
+      const j = await r.json();
+      outLotto.textContent = fmt(j);
+    })().catch(err => { outLotto.textContent = 'Lotto error: '+err; }));
+
+    await Promise.allSettled([classicPromise, lottoPromise]);
+    btn.disabled=false; btn.textContent=old;
+  }
+
+  async function runLotto(e){
+    e.preventDefault();
+    const btn = document.getElementById('btn_lotto');
+    const out = document.getElementById('out_lotto');
+    const n = document.getElementById('n_lotto').value.trim();
+    const budget = document.getElementById('budget_lotto').value.trim();
+
+    if(!n){ out.textContent='Error: enter an integer n'; return; }
+    btn.disabled=true; const old = btn.textContent; btn.textContent='Working…';
+    out.textContent='Lotto: working…';
+
+    try{
+      const payload = { n }; if(budget){ payload.budget_ms = Number(budget); }
+      const r = await fetch('/api/lotto_factor', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+      });
+      if(!r.ok){ const txt=await r.text(); throw new Error(txt || ('HTTP '+r.status)); }
+      const j = await r.json();
+      out.textContent = fmt(j);
+    }catch(err){
+      out.textContent = 'Lotto error: '+err;
+    }finally{
+      btn.disabled=false; btn.textContent=old;
+    }
+  }
+</script>
+</body>
+</html>
+<script>
+// override runClassic to show timings (ms) for both classic & lotto calls
+const _fmt = x => { try { return JSON.stringify(x, null, 2); } catch { return String(x); } };
+
+async function runClassic(e){
+  e.preventDefault();
+  const btn = document.getElementById('btn_classic');
+  const outClassic = document.getElementById('out_classic');
+  const outLotto = document.getElementById('out_lotto_auto');
+
+  const n = document.getElementById('n_classic').value.trim();
+  const t = document.getElementById('t_classic').value.trim();
+  const b = document.getElementById('b_classic').value.trim();
+  const also = document.getElementById('also_lotto').checked;
+  const budgetStr = document.getElementById('budget_lotto_auto').value.trim();
+
+  if(!n){ outClassic.textContent='Error: enter an integer n'; return; }
+  btn.disabled = true; const old = btn.textContent; btn.textContent='Working…';
+  outClassic.textContent='Classic: crunching…';
+  outLotto.textContent = also ? 'Lotto: working…' : 'Lotto: (disabled)';
+
+  const classicPromise = (async () => {
+    const t0 = performance.now();
+    const url = '/api/factor?n='+encodeURIComponent(n)+'&timeout_ms='+encodeURIComponent(t)+'&max_bits='+encodeURIComponent(b);
+    const r = await fetch(url);
+    const j = await r.json();
+    const dt = Math.round(performance.now() - t0);
+    outClassic.textContent = 'time_ms: '+dt+'\n' + _fmt(j);
+  })().catch(err => { outClassic.textContent = 'Classic error: ' + err; });
+
+  const lottoPromise = (!also ? Promise.resolve() : (async () => {
+    const payload = { n }; if (budgetStr) payload.budget_ms = Number(budgetStr);
+    const t1 = performance.now();
+    const r = await fetch('/api/lotto_factor', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    });
+    if(!r.ok){ const txt = await r.text(); throw new Error(txt || ('HTTP '+r.status)); }
+    const j = await r.json();
+    const dt = Math.round(performance.now() - t1);
+    outLotto.textContent = 'time_ms: '+dt+'\n' + _fmt(j);
+  })().catch(err => { outLotto.textContent = 'Lotto error: ' + err; }));
+
+  await Promise.allSettled([classicPromise, lottoPromise]);
+  btn.disabled = false; btn.textContent = old;
+}
+</script>
+<script>
+(() => {
+  const orig = window.fetch;
+  window.fetch = async function(input, init){
+    let url = typeof input === 'string' ? input : (input?.url || '');
+    const method = (init?.method || 'GET').toUpperCase();
+    if (url.includes('/api/factor') && method === 'GET') {
+      try {
+        const u = new URL(url, location.origin);
+        const tm = Number(u.searchParams.get('timeout_ms') || '0');
+        if (!Number.isFinite(tm) || tm <= 0) u.searchParams.set('timeout_ms', '15000');
+        input = u.toString();
+      } catch {}
+    }
+    if (url.includes('/api/lotto_factor') && method === 'POST' &&
+        String((init?.headers||{})['content-type'] || (init?.headers||{})['Content-Type']||'').includes('application/json')) {
+      try{
+        let payload = init.body;
+        if (typeof payload === 'string') try{ payload = JSON.parse(payload); }catch{}
+        const nRaw = payload?.n;
+        if (nRaw) {
+          const r = await orig('/api/normalize-text', { method:'POST', headers:{'content-type':'text/plain'}, body:String(nRaw) });
+          if (r.ok) {
+            const j = await r.json(); const bits = j?.items?.[0]?.bits;
+            if (typeof bits === 'number' && bits > 64) {
+              return new Response(JSON.stringify({ ok:true, skipped:true, reason:`n is ${bits}-bit; Lotto supports up to 64-bit`, n:nRaw, bits }), { status:200, headers:{'content-type':'application/json'} });
+            }
+          }
+        }
+      }catch {}
+    }
+    return orig(input, init);
+  };
+})();
+</script>
+<!-- === Lotto-128 (experimental) === -->
+<div class="card" style="margin-top:18px; padding:12px; border:1px solid #333; border-radius:8px;">
+  <h3>Lotto-128 (experimental)</h3>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <label>budget_ms <input id="lot128_budget" type="number" value="8000" min="1000" step="1000"></label>
+    <label>rho_restarts <input id="lot128_restarts" type="number" value="2048" min="64" step="64"></label>
+    <label>schedule
+      <select id="lot128_sched">
+        <option value="luby" selected>luby</option>
+        <option value="doubling">doubling</option>
+        <option value="fixed">fixed</option>
+      </select>
+    </label>
+  </div>
+  <button id="lot128_run" style="margin-top:8px;">Run Lotto-128</button>
+  <pre id="lot128_out" style="margin-top:8px; background:#111; color:#eee; padding:8px; overflow:auto; max-height:240px;">—</pre>
+</div>
+
+<script>
+(function(){
+  // Find the "n" from your Classic input
+  function getN(){
+    const qs = ['input#n','input[name="n"]','input[placeholder*="n"]','input[type="text"]','textarea'];
+    for (const sel of qs){
+      const el = document.querySelector(sel);
+      if (el && el.value && /\d/.test(el.value)) return el.value.trim();
+    }
+    return '';
+  }
+  async function postJSON(url, body){
+    const r = await fetch(url, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
+    const t = await r.text();
+    try { return JSON.parse(t); } catch { return { ok:false, error:'non-JSON', text:t }; }
+  }
+  const runBtn = document.getElementById('lot128_run');
+  const outEl  = document.getElementById('lot128_out');
+  runBtn?.addEventListener('click', async () => {
+    const n = getN();
+    if (!n){ outEl.textContent = 'Please enter n in the Classic box first.'; return; }
+    const budget_ms    = Number(document.getElementById('lot128_budget').value || 8000);
+    const rho_restarts = Number(document.getElementById('lot128_restarts').value || 2048);
+    const schedule     = String(document.getElementById('lot128_sched').value || 'luby');
+    outEl.textContent = 'working…';
+    const j = await postJSON('/api/lotto128_factor', { n, budget_ms, rho_restarts, schedule });
+    outEl.textContent = JSON.stringify(j, null, 2);
+  });
+})();
+</script>

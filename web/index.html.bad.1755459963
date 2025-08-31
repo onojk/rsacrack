@@ -1,0 +1,186 @@
+cd ~/rsacrack
+cp web/index.html web/index.html.bak.$(date +%s)
+
+cat > web/index.html <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>RSAcrack Coil</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  html,body,#c { height:100%; width:100%; margin:0 }
+  body { font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#0b0f16; color:#e6eefc }
+  .panel{position:fixed;top:12px;left:12px;background:#111826;border:1px solid #222b3c;border-radius:14px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,.35); width:260px}
+  .row{display:grid;grid-template-columns:80px 1fr 48px;gap:8px;margin:6px 0}
+  .row label{color:#a9b7d9;font-size:12px;align-self:center}
+  .row input{background:#0f1624;color:#e6eefc;border:1px solid #243049;border-radius:10px;padding:8px 10px}
+  .btn{background:linear-gradient(90deg,#2671ff,#23d2b0);border:none;color:white;border-radius:12px;padding:10px 12px;font-weight:600;cursor:pointer}
+  .tag{display:inline-block;padding:6px 10px;border-radius:10px;font-size:12px;border:1px solid #2b3650;color:#9ad7ff;background:#0f1726}
+  #json{white-space:pre;max-width:360px;overflow:auto;border:1px solid #243049;border-radius:12px;padding:10px;margin-top:8px;background:#0f1624; min-height:120px}
+  #toast{position:fixed;bottom:16px;left:16px;background:#13233a;border:1px solid #2b3850;color:#bfe8ff;padding:8px 12px;border-radius:10px;opacity:0;transition:.3s}
+  .small{font-size:12px;color:#8fb0cf}
+
+  /* “Why this works” panel */
+  .note{background:#0f1624;border:1px solid #243049;border-radius:12px;padding:12px;margin-top:8px;color:#cfe3ff}
+  .why-grid{display:grid;grid-template-columns:1fr 2fr;gap:12px}
+  .why-kv>div{margin:4px 0}
+  .why-kv strong{color:#9ad7ff}
+  .why-math p{margin:.4em 0;color:#b7c8e6}
+</style>
+</head>
+<body>
+<div class="panel">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+    <strong>RSAcrack Coil</strong><span id="ready" class="small">ready</span>
+  </div>
+  <div class="row"><label>n</label><input id="n" type="text" value="91"><button id="copy" class="small">Copy JSON</button></div>
+  <div class="row"><label>r0</label><input id="r0" type="number" step="0.01" value="1.0"><span></span></div>
+  <div class="row"><label>alpha</label><input id="alpha" type="number" step="0.001" value="0.0125"><span></span></div>
+  <div class="row"><label>beta</label><input id="beta" type="number" step="0.001" value="0.005"><span></span></div>
+  <div class="row"><label>L</label><input id="L" type="number" step="1" value="360"><span></span></div>
+  <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+    <button id="go" class="btn">Classify + Render</button>
+    <span id="badge" class="tag">Waiting…</span>
+  </div>
+
+  <!-- Results JSON -->
+  <div id="json"></div>
+
+  <!-- Why this works -->
+  <div id="why" class="why">
+    <button id="why-btn" class="tag" style="cursor:pointer">Why this works ▸</button>
+    <div id="why-panel" class="note" style="display:none"></div>
+  </div>
+
+  <div class="small" style="margin-top:6px">Tip: try <code>91</code>, <code>17947</code>, <code>118901521</code>.</div>
+</div>
+
+<canvas id="c"></canvas>
+<div id="toast"></div>
+
+<script>
+(function(){
+  function toast(msg){
+    const el = document.getElementById('toast');
+    if(!el) return;
+    el.textContent = msg;
+    el.style.opacity = 1;
+    setTimeout(()=>{ el.style.opacity = 0; }, 1500);
+  }
+
+  function updateBadge(data){
+    const badge = document.getElementById('badge');
+    if(!badge) return;
+    const cls = data?.class ?? null;
+    const msg = data?.prime_status ?? '—';
+    const suspected = data?.suspected ?? null;
+
+    // show suspected when class is "other"
+    badge.textContent = (cls === 'other' && suspected) ? `${msg} — suspected: ${suspected}` : msg;
+
+    // palette
+    badge.style.background = '#0f1726';
+    badge.style.borderColor = '#2b3650';
+    badge.style.color = '#9ad7ff';
+    if (cls === 'prime') {
+      badge.style.background = '#0d2a1a';
+      badge.style.borderColor = '#1f6b3d';
+      badge.style.color = '#9bffcb';
+    } else if (cls === 'semiprime' || cls === 'composite') {
+      badge.style.background = '#2a130f';
+      badge.style.borderColor = '#6b2c1f';
+      badge.style.color = '#ffb89b';
+    } else {
+      badge.style.background = '#141820';
+      badge.style.borderColor = '#2b3650';
+      badge.style.color = '#b8c7e6';
+    }
+  }
+
+  function updateWhy(d){
+    const panel=document.getElementById("why-panel");
+    if(!panel) return;
+    if(!d){ panel.innerHTML=""; return; }
+    const cls = d.class ?? "unknown";
+    const dots = (d.dots===null||d.dots===undefined)? "—" : d.dots;
+    const suspected = d.suspected ?? "unknown";
+    const n = d.n_str || String(d.n ?? "");
+    const lines = [
+      `<strong>n:</strong> ${n}`,
+      `<strong>tested class:</strong> ${cls}`,
+      `<strong>dot count τ(n):</strong> ${dots}`,
+      `<strong>suspected from dots:</strong> ${suspected}`,
+      `<strong>JS-safe integer:</strong> ${d.n_js_safe?"yes":"no"}`
+    ];
+    const math = `
+      <p><em>Idea.</em> Each divisor of <code>n</code> yields a “tangent” hit on a flattened coil; the total equals τ(n).</p>
+      <p>So: τ(1)=1 (special); τ(n)=2 (prime); τ(n)&gt;2 (composite; τ(n)=4 for semiprimes). We compute τ(n) exactly up to 10<sup>12</sup>; above that we leave it unknown.</p>`;
+    panel.innerHTML = `<div class="why-grid"><div class="why-kv">${lines.map(x=>`<div>${x}</div>`).join("")}</div><div class="why-math">${math}</div></div>`;
+  }
+
+  async function classifyAndRender(){
+    const nVal = document.getElementById("n").value.trim() || "0";
+    const r0   = document.getElementById("r0").value || "1.0";
+    const alpha= document.getElementById("alpha").value || "0.0125";
+    const beta = document.getElementById("beta").value || "0.005";
+    const L    = document.getElementById("L").value || "360";
+
+    const qs = new URLSearchParams({n:nVal,r0,alpha,beta,L}).toString();
+    const jsonEl = document.getElementById("json");
+
+    try{
+      const r = await fetch(`/api/classify?${qs}`);
+      if(!r.ok){
+        toast(`API error ${r.status}`);
+        return;
+      }
+      const data = await r.json();
+
+      // show JSON pretty
+      if(jsonEl){
+        jsonEl.textContent = JSON.stringify(data, null, 2);
+      }
+      // badge + why
+      updateBadge(data);
+      updateWhy(data);
+    }catch(e){
+      toast(`Fetch failed: ${e?.message || e}`);
+    }
+  }
+
+  // wire up
+  document.addEventListener("DOMContentLoaded", ()=>{
+    const b=document.getElementById("go");
+    if(b) b.addEventListener("click", classifyAndRender);
+
+    const whyBtn=document.getElementById("why-btn");
+    const whyPanel=document.getElementById("why-panel");
+    if(whyBtn && whyPanel){
+      whyBtn.addEventListener("click", ()=>{
+        const open = whyPanel.style.display !== "none";
+        whyPanel.style.display = open ? "none" : "block";
+        whyBtn.textContent = open ? "Why this works ▸" : "Why this works ▾";
+      });
+    }
+
+    // Copy JSON button
+    const copyBtn = document.getElementById("copy");
+    if(copyBtn){
+      copyBtn.addEventListener("click", async ()=>{
+        try{
+          const txt = document.getElementById("json")?.textContent || "{}";
+          await navigator.clipboard.writeText(txt);
+          toast("JSON copied");
+        }catch{ toast("Copy failed"); }
+      });
+    }
+  });
+})();
+</script>
+</body>
+</html>
+HTML
+
+# restart and hard-refresh
+sudo systemctl restart rsacrack

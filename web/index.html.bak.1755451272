@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>RSAcrack Coil</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  html,body,#c { height:100%; width:100%; margin:0 }
+  body { font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#0b0f16; color:#e6eefc }
+  .panel{position:fixed;top:12px;left:12px;background:#111826;border:1px solid #222b3c;border-radius:14px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  .row{display:grid;grid-template-columns:80px 1fr 48px;gap:8px;margin:6px 0}
+  .row label{color:#a9b7d9;font-size:12px;align-self:center}
+  .row input{background:#0f1624;color:#e6eefc;border:1px solid #243049;border-radius:10px;padding:8px 10px}
+  .btn{background:linear-gradient(90deg,#2671ff,#23d2b0);border:none;color:white;border-radius:12px;padding:10px 12px;font-weight:600;cursor:pointer}
+  .tag{display:inline-block;padding:4px 8px;border-radius:10px;font-size:12px;border:1px solid #2b3650;color:#9ad7ff;background:#0f1726;margin-top:6px}
+  #json{white-space:pre;max-width:360px;overflow:auto;border:1px solid #243049;border-radius:12px;padding:10px;margin-top:8px;background:#0f1624}
+  #toast{position:fixed;bottom:16px;left:16px;background:#13233a;border:1px solid #2b3850;color:#bfe8ff;padding:8px 12px;border-radius:10px;opacity:0;transition:.3s}
+  .small{font-size:12px;color:#8fb0cf}
+</style>
+</head>
+<body>
+<div class="panel">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+    <strong>RSAcrack Coil</strong><span id="ready" class="small">ready</span>
+  </div>
+
+  <div class="row"><label>n</label><input id="n" type="text" value="91"><button id="copy" class="small">Copy JSON</button></div>
+<div class="row">
+  <label>digits</label>
+  <input id="digits-n" type="number" min="1" max="1000" value="10" />
+  <button id="gen" class="small">Random n</button>
+</div>
+  <div class="row"><label>r0</label><input id="r0" type="number" step="0.01" value="1.0"><span></span></div>
+<div class="row">
+  <label>digits</label>
+  <input id="digits" type="number" min="1" max="1000" value="10" />
+  <button id="gen" class="small">Random n</button>
+</div>
+  <div class="row"><label>alpha</label><input id="alpha" type="number" step="0.001" value="0.0125"><span></span></div>
+  <div class="row"><label>beta</label><input id="beta" type="number" step="0.001" value="0.005"><span></span></div>
+  <div class="row"><label>L</label><input id="L" type="number" step="1" value="360"><span></span></div>
+
+  <div style="display:flex;gap:8px;margin-top:8px">
+    <button id="go" class="btn">Classify + Render</button>
+    <span id="badge" class="tag">—</span>
+  </div>
+  <div id="json"></div>
+  <div class="small" style="margin-top:6px">Tip: try <code>91</code>, <code>17947</code>, <code>118901521</code>.</div>
+</div>
+
+<canvas id="c"></canvas>
+<div id="toast"></div>
+
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+
+const el = s => document.querySelector(s);
+const NIN = id => Number(el(id).value);
+const toast = (t)=>{const k=el('#toast');k.textContent=t;k.style.opacity=1;setTimeout(()=>k.style.opacity=0,1300);};
+
+const canvas = el('#c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0f16);
+const camera = new THREE.PerspectiveCamera(60, 2, 0.01, 5000);
+camera.position.set(0, 0, 18);
+const light = new THREE.DirectionalLight(0xffffff, 1.0); light.position.set(5,10,8); scene.add(light);
+
+let points = null;
+function makeCoilPoints(N, r0, alpha, beta, L){
+  const aN = new Float32Array(N); for(let i=0;i<N;i++) aN[i]=i+1;
+  const geom = new THREE.BufferGeometry(); geom.setAttribute("aN", new THREE.BufferAttribute(aN,1));
+  const vsh = `
+    precision highp float; attribute float aN;
+    uniform float r0, alpha, beta, L; varying float vN;
+    void main(){
+      float n = aN, r = r0 + alpha * n;
+      float th = 6.28318530718 * n / L;
+      vec3 pos = vec3(r*cos(th), r*sin(th), beta*n);
+      vec4 mv = modelViewMatrix * vec4(pos,1.0);
+      gl_Position = projectionMatrix * mv;
+      gl_PointSize = 3.0 / -mv.z * 250.0;
+      vN = n;
+    }`;
+  const fsh = `
+    precision highp float; varying float vN; uniform float p,q,n;
+    void main(){
+      vec3 col = vec3(0.25,0.35,0.8);
+      if (abs(vN-1.0)<0.5) col=vec3(0.95,0.9,0.2);
+      if (abs(vN-p)<0.5) col=vec3(0.2,0.9,0.6);
+      if (abs(vN-q)<0.5) col=vec3(0.9,0.3,0.3);
+      if (abs(vN-n)<0.5) col=vec3(0.95,0.6,0.2);
+      gl_FragColor=vec4(col,1.0);
+    }`;
+  const mat = new THREE.ShaderMaterial({
+    vertexShader:vsh, fragmentShader:fsh,
+    uniforms:{r0:{value:r0},alpha:{value:alpha},beta:{value:beta},L:{value:L},p:{value:0},q:{value:0},n:{value:0}}
+  });
+  const pts = new THREE.Points(geom, mat); scene.add(pts); return pts;
+}
+function resize(){ const w=window.innerWidth,h=window.innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+function loop(){ resize(); scene.rotation.z += 0.0015; renderer.render(scene,camera); requestAnimationFrame(loop); } loop();
+
+function setLoading(on){  const btn=document.getElementById('go');  const badge=document.getElementById('badge');  if(btn){ btn.disabled=!!on; btn.textContent = on ? 'Working…' : 'Classify + Render'; }  if(badge && (badge.textContent==='—' || on)){ badge.textContent = on ? 'loading…' : '—'; }}
+async function go(){ console.log("[coil] go() start");
+  setLoading(true);
+  try {
+    const nStr = document.getElementById("n").value.trim().replace(/^0+/, "") || "0";
+    const NIN = (sel)=>Number(document.querySelector(sel).value);
+    const r0 = NIN("#r0"), alpha = NIN("#alpha"), beta = NIN("#beta"), L = NIN("#L");
+
+    const qs = (obj)=>Object.entries(obj).map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join("&");
+
+    const classifyP = fetch(`/api/classify?${qs({n:nStr, r0, alpha, beta, L})}`).then(r=>r.json());
+    const factorP   = fetch(`/api/factor?${qs({n:nStr})}`).then(r=>r.json()).catch(()=>null);
+
+    const [clsRes, facRes] = await Promise.all([classifyP, factorP]);
+
+    const merged = {...clsRes};
+    if (facRes) merged.factor_info = facRes;
+
+    const outEl = document.getElementById("json");
+    if (outEl) outEl.textContent = JSON.stringify(merged, null, 2);
+
+    const pill = document.getElementById("badge");
+    if (pill) {
+      const c = merged.class;
+      pill.textContent = (c==='semiprime'||c==='prime'||c==='composite'||c==='other') ? c : '—';
+    }
+
+    // Render-safe integer for shader uniforms
+    let nForRender = parseInt(nStr, 10);
+    if (!Number.isFinite(nForRender) || nForRender < 1) nForRender = 1;
+    const N = Math.min(nForRender, 20000);
+
+    if (window.points) { scene.remove(window.points); window.points = null; }
+    window.points = makeCoilPoints(N, r0, alpha, beta, L);
+    window.points.material.uniforms.n.value = nForRender;
+
+    if (merged.class === "semiprime" && merged.primes?.length === 2) {
+      window.points.material.uniforms.p.value = merged.primes[0];
+      window.points.material.uniforms.q.value = merged.primes[1];
+    } else {
+      window.points.material.uniforms.p.value = 0;
+      window.points.material.uniforms.q.value = 0;
+    }
+  } catch (e) {
+    console.error(e);
+    const pill = document.getElementById("badge");
+    if (pill) pill.textContent = "error";
+    const outEl = document.getElementById("json");
+    if (outEl) outEl.textContent = "Error: " + (e && e.message || e);
+  } finally {
+    setLoading(false);
+  }
+}
+document.querySelector("#gen")?.console.log("[coil] gen wired"); addEventListener("click", (e) => {
+  e.preventDefault();
+  const k = Number(document.querySelector("#digits").value || 10);
+  const s = randomKDigitString(k);
+  const nEl = document.querySelector("#n");
+  nEl.value = s;
+  document.querySelector("#go")?.click();
+});
+document.addEventListener('DOMContentLoaded',()=>{const b=document.getElementById('go'); if(b){ b.addEventListener('click', go); console.log('[coil] go wired');}});
+window.go = go;
+document.addEventListener("DOMContentLoaded",()=>{ const b=document.getElementById("go"); if(b && !b.onclick){ b.addEventListener("click", go); }});
+/* ---- Random n generator + wiring ---- */
+function randomKDigitString(k){
+  k = Math.max(1, Math.min(1000, Math.floor(k||1)));
+  const bytes = new Uint8Array(k);
+  crypto.getRandomValues(bytes);
+  const digits = Array.from(bytes, b => String(b % 10));
+  if (digits[0] === "0") digits[0] = String(1 + (bytes[0] % 9));   // no leading 0
+  const endings = ["1","3","7","9"];                               // odd, not 5
+  digits[k - 1] = endings[bytes[k - 1] % endings.length];
+  return digits.join("");
+}
+
+function handleGenClick(ev){
+  ev.preventDefault();
+  const k = Number(document.querySelector("#digits")?.value || 10);
+  const s = randomKDigitString(k);
+  const nEl = document.querySelector("#n");
+  if (nEl) nEl.value = s;
+  document.getElementById("go")?.click();
+}
+
+function wireRandomButtons(){
+  // candidates by id/class/attribute
+  const candidates = new Set([
+    ...document.querySelectorAll("#gen, button.gen, [data-gen], .gen-n, .random-n")
+  ]);
+
+  // fallback: match by visible text “Random n”
+  if (candidates.size === 0) {
+    for (const b of document.querySelectorAll("button")) {
+      const t = (b.textContent || "").trim().toLowerCase();
+      if (t.includes("random n")) candidates.add(b);
+    }
+  }
+
+  // attach once
+  for (const b of candidates) {
+    if (!b.dataset._genwired) {
+      b.addEventListener("click", handleGenClick);
+      b.dataset._genwired = "1";
+    }
+  }
+  console.log(`[coil] random buttons wired: ${candidates.size}`);
+}
+
+document.addEventListener("DOMContentLoaded", wireRandomButtons);
+
+</script>
+<script>
+
+document.addEventListener("DOMContentLoaded", () => {
+
+  const $ = (s, r=document) => r.querySelector(s);
+
+
+
+  // Ensure go() is connected
+
+  const goBtn = document.getElementById("go") || $("button.btn");
+
+  if (typeof window.go === "function" && goBtn && !goBtn.__wiredGo) {
+
+    goBtn.addEventListener("click", (e) => {
+
+      try {
+
+        console.log("[coil] go clicked");
+
+        window.go(e);
+
+      } catch (err) {
+
+        console.error("[coil] go error:", err);
+
+        alert("go() error: " + (err?.message || err));
+
+      }
+
+    });
+
+    goBtn.__wiredGo = true;
+
+    console.log("[coil] go wired");
+
+  }
+
+
+
+  // Wire "Random n" (id="gen", or guess by text if no id)
+
+  const genBtn = document.getElementById("gen") ||
+
+    [...document.querySelectorAll("button")].find(b =>
+
+      /random/i.test(b.textContent || "") && /n/i.test(b.textContent || "")
+
+    );
+
+
+
+  if (genBtn && !genBtn.__wiredGen) {
+
+    genBtn.addEventListener("click", (e) => {
+
+      e.preventDefault();
+
+      const k = Number(document.getElementById("digits-n")?.value || 10);
+
+      const s = (typeof window.randomKDigitString === "function")
+
+        ? window.randomKDigitString(k)
+
+        : String(Math.floor(Math.random()*9)+1).padEnd(k, "0");
+
+      const nEl = document.getElementById("n") || $("input[name="n"]");
+
+      if (nEl) nEl.value = s;
+
+      goBtn?.click();
+
+    });
+
+    genBtn.__wiredGen = true;
+
+    console.log("[coil] gen wired");
+
+  }
+
+});
+
+</script>
+</body>
+</html>
