@@ -1,24 +1,12 @@
 name: Deploy to RSACrack
-
 on:
-  workflow_run:
-    workflows: ["CI"]      # matches name: CI in .github/workflows/ci.yml
-    types: [completed]
-    branches: [main]
+  push:
+    branches: [ main ]
   workflow_dispatch:
-
-concurrency:
-  group: prod-deploy
-  cancel-in-progress: true
 
 jobs:
   deploy:
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment:
-      name: production
-      url: https://rsacrack.com
     steps:
       - uses: actions/checkout@v4
 
@@ -28,6 +16,7 @@ jobs:
           host: ${{ secrets.RSACRACK_HOST }}
           username: ${{ secrets.RSACRACK_USER }}
           key: ${{ secrets.RSACRACK_SSH_KEY }}
+          fingerprint: ${{ secrets.RSACRACK_FINGERPRINT }}
           script: bash ~/rsacrack/deploy.sh
 
       - name: Health check (domain, then IP)
@@ -36,20 +25,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "Checking https://rsacrack.com/api/health"
-          for i in {1..10}; do
-            curl -fsS https://rsacrack.com/api/health && exit 0
-            sleep 3
-          done
+          for i in {1..10}; do curl -fsS https://rsacrack.com/api/health && exit 0; sleep 3; done
           echo "Domain not ready, trying http://$HOST/api/health"
-          for i in {1..10}; do
-            curl -fsS "http://$HOST/api/health" && exit 0
-            sleep 3
-          done
-          echo "Health check failed"
-          exit 1
-
-      - name: Summary
-        run: |
-          echo "### Deployed to production ✅" >> "$GITHUB_STEP_SUMMARY"
-          echo "- SHA: \`$GITHUB_SHA\`"       >> "$GITHUB_STEP_SUMMARY"
-          echo "- Host: ${{ secrets.RSACRACK_HOST }}" >> "$GITHUB_STEP_SUMMARY"
+          for i in {1..10}; do curl -fsS "http://$HOST/api/health" && exit 0; sleep 3; done
+          echo "Health check failed"; exit 1
