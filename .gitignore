@@ -1,25 +1,4 @@
-# Python
-.venv/
+*.bak
 __pycache__/
 *.pyc
-
-# Logs / runtime
-*.log
-gunicorn.err
-gunicorn.out
-
-# Local artifacts
-cache/
-backups/
-*.bak.*
-*.bad.*
-
-# Large data dumps
-*.csv.gz
-
-# OS/editor junk
-.DS_Store
-
-# accidental files
-=3.0
-=21.2
+*.pyo

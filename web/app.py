@@ -1,9 +1,11 @@
+from rho_api import rho_bp
 import time
 from flask import Flask, request, jsonify, send_from_directory
 from werkzeug.exceptions import BadRequest
 from lotto_factor import factor_lotto_64
 
 app = Flask(__name__, static_folder="static")
+app.register_blueprint(rho_bp)
 
 @app.get("/")
 def index():

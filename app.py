@@ -1,3 +1,4 @@
+from rho_api import rho_bp
 import os, sys
 from flask import Flask, request, jsonify, render_template_string, send_from_directory
 
@@ -10,6 +11,7 @@ except Exception:
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "web", "public")
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
+app.register_blueprint(rho_bp)
 
 PAGE = """<!doctype html><html><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -53,7 +55,7 @@ pre{white-space:pre-wrap;word-break:break-all;background:#f6f6f6;border:1px soli
 </div>
 
 <div class="card">
-  <h3>Rho (fast demo, up to 128-bit)</h3>
+  <h3>Rho (fast demo, up to 512-bit; ≥256-bit may be very slow)</h3>
   <div class="grid">
     <div><label>N (≤128-bit integer)</label><input id="r_n" class="mono"/></div>
     <div><label>Iterations (budget)</label><input id="r_it" value="1000000"/></div>
