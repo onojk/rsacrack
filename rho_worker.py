@@ -1,6 +1,13 @@
 
 import random, math
 from math import gcd
+import time
+
+def _timeit(fn, *a, **kw):
+    t0 = time.perf_counter()
+    r  = fn(*a, **kw)
+    return r, time.perf_counter() - t0
+
 
 # ---- gmpy2 acceleration (optional) -----------------------------------------
 try:
@@ -243,6 +250,12 @@ def pollard_rho_job(N, budget=500_000):
         return {"algo":"trial","iters":0,"factor":2,"cofactor":int(n//2)}
 
     # 0) small trial
+
+    # --- Williams p+1 quick pass (2^t-smooth) BEFORE p-1 ---
+    g = _pplus1_pow2(n, B1=(1<<64), t_max=80, tries=64)
+    if g:
+        return {'algo': 'Williams p+1 (2-smooth)', 'iters': 0,
+                'factor': int(g), 'cofactor': int(n//g)}
     f = _small_trial(n, limit=min(1_000_000, max(50_000, int(budget//50))))
     if f:
         return {"algo":"trial","iters":0,"factor":int(f),"cofactor":int(n//f)}
@@ -276,3 +289,73 @@ def pollard_rho_job(N, budget=500_000):
     if f:
         return {"algo":"Pollard Rho (Brent+blockGCD)","iters":int(it),"factor":int(f),"cofactor":int(n//f)}
     return {"algo":"Pollard Rho (Brent+blockGCD)","iters":int(it),"note":"budget exhausted","factor":None,"cofactor":None}
+
+# ---- Williams p+1, stage-1 (2-smooth quick pass) ----------------------------
+def _lucas_v_pow2(P, n, t):
+    """
+    Compute V_{2^t}(P,1) mod n using Lucas doubling (Q=1):
+      U_{2m} = U_m * V_m
+      V_{2m} = V_m^2 - 2
+    """
+    P = mpz(P); n = mpz(n)
+    U = mpz(1) % n  # U_1
+    V = P % n       # V_1
+    for _ in range(int(t)):
+        U = (U * V) % n
+        V = (V * V - 2) % n
+    return int(V)
+
+
+def _pplus1_pow2(n, B1=(1<<64), t_max=80, tries=64):
+    """
+    Quick Williams p+1 (stage-1 using only 2^t-smooth exponent via Lucas V-doubling, Q=1).
+    Returns a nontrivial factor of n if p+1 is 2^t-smooth for some t <= t_max.
+    """
+    n = mpz(n)
+    if n % 2 == 0:
+        return 2
+    t = min(int(B1).bit_length() - 1, int(t_max))
+    if t <= 0:
+        return None
+    for _ in range(int(tries)):
+        # random odd P
+        P = mpz(RAND.randrange(3, int(min(n-1, 1<<63))))
+        if (P & 1) == 0:
+            P += 1
+        V = _lucas_v_pow2(P, n, t)
+        g = gcd(int((V - 2) % n), int(n))
+        if 1 < g < n:
+            return int(g)
+    return None
+def _hart_smart(n, budget=200_000):
+    """
+    Hart-like near-square: scan k, skipping residues that cannot yield squares.
+    Returns a nontrivial factor or None.
+    """
+    n = mpz(n)
+    if n % 2 == 0:
+        return 2
+    kmax = max(2000, min(100_000, int(budget//12)))
+    a0 = isqrt(n)
+    tried = 0
+    for k in range(1, kmax+1):
+        if (k & 3) == 2:       # skip k ≡ 2 (mod 4)
+            continue
+        if (k % 3) == 0:       # light pruning
+            continue
+        kn = k * n
+        a = a0
+        if a*a < kn:
+            a = isqrt(kn)
+            if a*a < kn:
+                a += 1
+        b2 = a*a - kn
+        if b2 >= 0 and is_square(b2):
+            b = isqrt(b2)
+            g = gcd(int(a - b), int(n))
+            if 1 < g < n:
+                return int(g)
+        tried += 1
+        if tried >= kmax:
+            break
+    return None
