@@ -19,3 +19,7 @@ backups/
 
 # OS/editor junk
 .DS_Store
+
+# accidental files
+=3.0
+=21.2
