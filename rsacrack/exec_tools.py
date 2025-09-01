@@ -1,5 +1,6 @@
 from __future__ import annotations
-import shutil, subprocess, re, time
+import shutil, subprocess, re, time, os, math
+import concurrent.futures
 from dataclasses import dataclass
 
 ECM_BIN = shutil.which("ecm")
@@ -32,15 +33,119 @@ def _pick_factor(n:int, text:str)->int|None:
 def _ecm_available() -> bool:
     return bool(ECM_BIN)
 
-def ecm_try(n:int, B1:int, B2:int|None=None, curves:int=1, timeout_s:float=30.0)->FactorHit|None:
+# Trial division function
+def trial_division(n: int, timeout_s: float = 10.0) -> int | None:
+    t0 = time.time()
+    if n % 2 == 0:
+        return 2
+    if n % 3 == 0:
+        return 3
+    limit = min(int(math.isqrt(n)) + 1, 1000000)
+    for i in range(5, limit, 6):
+        if time.time() - t0 > timeout_s:
+            return None
+        if n % i == 0:
+            return i
+        if n % (i + 2) == 0:
+            return i + 2
+    return None
+
+# Fermat's factorization method - fixed implementation
+def fermat_try(n: int, timeout_s: float = 10.0) -> int | None:
+    t0 = time.time()
+    if n % 2 == 0:
+        return 2
+    
+    # Check if n is a perfect square
+    root = math.isqrt(n)
+    if root * root == n:
+        return root
+    
+    # Fermat's algorithm for odd numbers
+    x = math.isqrt(n) + 1
+    while time.time() - t0 < timeout_s:
+        y2 = x * x - n
+        y = math.isqrt(y2)
+        if y * y == y2:
+            factor = x - y
+            if factor != 1 and factor != n:  # Avoid trivial factors
+                return factor
+        x += 1
+    return None
+
+# Pollard's Rho implementation (basic)
+def pollard_rho(n: int, timeout_s: float = 10.0) -> int | None:
+    t0 = time.time()
+    if n % 2 == 0:
+        return 2
+    x = 2
+    y = 2
+    d = 1
+    f = lambda x: (x * x + 1) % n
+    while d == 1 and time.time() - t0 < timeout_s:
+        x = f(x)
+        y = f(f(y))
+        d = math.gcd(abs(x - y), n)
+    return d if d != n else None
+
+def pollard_rho_try(n: int, timeout_s: float = 10.0) -> FactorHit | None:
+    t0 = time.time()
+    try:
+        f = pollard_rho(n, timeout=timeout_s)
+    except TimeoutError:
+        return None
+    ms = int((time.time() - t0) * 1000)
+    if f and 1 < f < n and n % f == 0:
+        return FactorHit("pollard_rho", f, "Pollard's Rho", ms)
+    return None
+
+def pollard_rho_try_parallel(n: int, instances: int = 1, timeout_s: float = 10.0) -> FactorHit | None:
+    if instances <= 1:
+        return pollard_rho_try(n, timeout_s)
+    
+    num_workers = min(instances, os.cpu_count() or 1)
+    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+        futures = [executor.submit(pollard_rho_try, n, timeout_s) for _ in range(instances)]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                result = future.result()
+            except Exception as e:
+                continue
+            if result is not None:
+                for f in futures:
+                    f.cancel()
+                return result
+    return None
+
+def ecm_try(n:int, B1:int, B2:int|None=None, timeout_s:float=30.0)->FactorHit|None:
     if not _ecm_available():
         return None
-    args = [ECM_BIN, "-c", str(curves)]
+    args = [ECM_BIN]
     if B2: args += [str(B1), str(B2)]
     else:  args += [str(B1)]
     rc, out, err, ms = _run_with_stdin(args, str(n), timeout_s)
     f = _pick_factor(n, out + "\n" + err)
-    return FactorHit("ecm", f, f"ECM B1={B1} B2={B2} c={curves}", ms) if f else None
+    return FactorHit("ecm", f, f"ECM B1={B1} B2={B2}", ms) if f else None
+
+def ecm_try_parallel(n: int, B1: int, B2: int | None = None, curves: int = 1, timeout_s: float = 30.0) -> FactorHit | None:
+    if not _ecm_available():
+        return None
+    if curves <= 1:
+        return ecm_try(n, B1, B2, timeout_s)
+    
+    num_workers = min(curves, os.cpu_count() or 1)
+    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+        futures = [executor.submit(ecm_try, n, B1, B2, timeout_s) for _ in range(curves)]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                result = future.result()
+            except Exception as e:
+                continue
+            if result is not None:
+                for f in futures:
+                    f.cancel()
+                return result
+    return None
 
 def pm1_try(n:int, B1:int, B2:int|None=None, timeout_s:float=10.0)->FactorHit|None:
     if not _ecm_available():

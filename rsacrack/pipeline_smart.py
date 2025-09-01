@@ -1,101 +1,148 @@
-from __future__ import annotations
-import math, time
+from .exec_tools import (
+    trial_division, fermat_try, pollard_rho_try_parallel, 
+    pm1_try, pp1_try, ecm_try_parallel
+)
+import math
 
-try:
-    from rsacrack import is_probable_prime
-except Exception:
-    def _mr(n:int)->bool:
-        if n<2: return False
-        small=(2,3,5,7,11,13,17,19,23,29,31,37)
-        for p in small:
-            if n%p==0: return n==p
-        d=n-1; s=0
-        while d%2==0:
-            d//=2; s+=1
-        for a in (2, 325, 9375, 28178, 450775, 9780504, 1795265022):
-            if a%n==0: continue
-            x=pow(a,d,n)
-            if x==1 or x==n-1: continue
-            for _ in range(s-1):
-                x=(x*x)%n
-                if x==n-1: break
-            else:
-                return False
-        return True
-    is_probable_prime=_mr
+def get_curves_for_ecm(n: int) -> int:
+    digits = len(str(n))
+    if digits < 40:
+        return 4
+    elif digits < 60:
+        return 8
+    else:
+        return 16
 
-from .exec_tools import pm1_try, pp1_try, ecm_try
+def get_instances_for_pollard_rho(n: int) -> int:
+    digits = len(str(n))
+    if digits < 30:
+        return 2
+    elif digits < 40:
+        return 4
+    else:
+        return 8
 
-_SMALL_PRIMES = [2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97]
+def factorize_smart(n: int, timeout_ms: int = 5000) -> dict:
+    steps = []
+    time_used_ms = 0
+    time_left_ms = timeout_ms
 
-def _trial(n:int):
-    for p in _SMALL_PRIMES:
-        if n%p==0:
-            return p if n!=p else None
-    return None
+    # Helper to update time left
+    def update_time(elapsed):
+        nonlocal time_used_ms, time_left_ms
+        time_used_ms += elapsed
+        time_left_ms = max(0, timeout_ms - time_used_ms)
 
-def _now_ms(): return int(time.time()*1000)
+    # 1. Trial division
+    if time_left_ms > 0:
+        factor = trial_division(n, time_left_ms / 1000)
+        if factor:
+            steps.append("trial division hit")
+            return {
+                "status": "ok",
+                "n": str(n),
+                "p": str(factor),
+                "q": str(n // factor),
+                "method": "trial",
+                "steps": steps,
+                "time_ms": time_used_ms
+            }
+        steps.append("trial division missed")
 
-def factor_smart(n:int, max_ms:int=3000)->dict|None:
-    """
-    Returns dict: {p,q,method,steps} or None on timeout/exhaustion.
-    CPU-only ladder: trial -> short Fermat -> P-1 -> P+1 -> ECM tiers, within max_ms.
-    """
-    start=_now_ms()
-    def left_ms(): return max(0, max_ms - (_now_ms()-start))
-    def budget(sec:float)->float: return max(0.0, min(sec, left_ms()/1000.0))
+    # 2. Fermat's method
+    if time_left_ms > 0 and len(str(n)) < 40:  # Fermat is fast for close factors
+        factor = fermat_try(n, time_left_ms / 1000)
+        if factor:
+            steps.append("fermat hit")
+            return {
+                "status": "ok",
+                "n": str(n),
+                "p": str(factor),
+                "q": str(n // factor),
+                "method": "fermat",
+                "steps": steps,
+                "time_ms": time_used_ms
+            }
+        steps.append("fermat missed")
 
-    n=int(n)
-    if n<=1: return None
-    if is_probable_prime(n):
-        return {"p":n, "q":1, "method":"prime", "steps":["n is (probable) prime"]}
+    # 3. Pollard's Rho with parallel instances
+    if time_left_ms > 0:
+        instances = get_instances_for_pollard_rho(n)
+        factor = pollard_rho_try_parallel(n, instances=instances, timeout_s=time_left_ms / 1000)
+        if factor:
+            steps.append(f"pollard_rho hit with {instances} instances")
+            return {
+                "status": "ok",
+                "n": str(n),
+                "p": str(factor.p),
+                "q": str(n // factor.p),
+                "method": factor.method,
+                "detail": factor.detail,
+                "steps": steps,
+                "time_ms": time_used_ms + factor.elapsed_ms
+            }
+        steps.append("pollard_rho missed")
 
-    # 0) tiny trial
-    p=_trial(n)
-    if p:
-        q=n//p
-        return {"p":int(p), "q":int(q), "method":"trial", "steps":["trial division hit"]}
+    # 4. P-1 method
+    if time_left_ms > 0:
+        # Choose B1 based on n size
+        B1 = min(10000, int(math.sqrt(math.sqrt(n))))
+        factor = pm1_try(n, B1, timeout_s=time_left_ms / 1000)
+        if factor:
+            steps.append("p-1 hit")
+            return {
+                "status": "ok",
+                "n": str(n),
+                "p": str(factor.p),
+                "q": str(n // factor.p),
+                "method": factor.method,
+                "detail": factor.detail,
+                "steps": steps,
+                "time_ms": time_used_ms + factor.elapsed_ms
+            }
+        steps.append("p-1 missed")
 
-    steps=[]
+    # 5. P+1 method
+    if time_left_ms > 0:
+        B1 = min(10000, int(math.sqrt(math.sqrt(n))))
+        factor = pp1_try(n, B1, timeout_s=time_left_ms / 1000)
+        if factor:
+            steps.append("p+1 hit")
+            return {
+                "status": "ok",
+                "n": str(n),
+                "p": str(factor.p),
+                "q": str(n // factor.p),
+                "method": factor.method,
+                "detail": factor.detail,
+                "steps": steps,
+                "time_ms": time_used_ms + factor.elapsed_ms
+            }
+        steps.append("p+1 missed")
 
-    # 1) quick Fermat (few hundred deltas for near-square)
-    a = math.isqrt(n)
-    if a*a<n: a+=1
-    for i in range(256):
-        b2 = a*a - n
-        if b2>=0:
-            b = math.isqrt(b2)
-            if b*b==b2:
-                p = a-b; q = a+b
-                if 1<p<n and n%p==0:
-                    return {"p":int(p), "q":int(q), "method":"fermat", "steps":[f"Fermat hit at i={i}"]}
-        a += 1
-        if left_ms() <= 0: return None
+    # 6. ECM with parallel curves
+    if time_left_ms > 0:
+        curves = get_curves_for_ecm(n)
+        B1 = 10000
+        B2 = 100000
+        factor = ecm_try_parallel(n, B1, B2, curves=curves, timeout_s=time_left_ms / 1000)
+        if factor:
+            steps.append(f"ecm hit with {curves} curves")
+            return {
+                "status": "ok",
+                "n": str(n),
+                "p": str(factor.p),
+                "q": str(n // factor.p),
+                "method": factor.method,
+                "detail": factor.detail,
+                "steps": steps,
+                "time_ms": time_used_ms + factor.elapsed_ms
+            }
+        steps.append("ecm missed")
 
-    # 2) P-1 sweeps
-    for (B1,B2,sec) in [(2000, 200000, 0.6), (20000, 1000000, 1.0)]:
-        hit = pm1_try(n, B1, B2, timeout_s=budget(sec))
-        if hit and hit.p:
-            p=hit.p; q=n//p
-            return {"p":int(p), "q":int(q), "method":"p-1", "steps":steps+[hit.detail]}
-
-    # 3) P+1 sweeps
-    for (B1,B2,sec) in [(3000, 300000, 0.6), (30000, 2000000, 1.0)]:
-        hit = pp1_try(n, B1, B2, timeout_s=budget(sec))
-        if hit and hit.p:
-            p=hit.p; q=n//p
-            return {"p":int(p), "q":int(q), "method":"p+1", "steps":steps+[hit.detail]}
-
-    # 4) ECM tiers (few curves, increasing bounds)
-    for (B1,B2,curves,sec) in [
-        (5000,   500000,   2, 0.8),
-        (50000,  5000000,  2, 1.2),
-        (250000, 20000000, 1, 1.6),
-    ]:
-        hit = ecm_try(n, B1, B2, curves=curves, timeout_s=budget(sec))
-        if hit and hit.p:
-            p=hit.p; q=n//p
-            return {"p":int(p), "q":int(q), "method":"ecm", "steps":steps+[hit.detail]}
-        if left_ms() <= 0: return None
-
-    return None
+    return {
+        "status": "timeout" if time_left_ms <= 0 else "no factor found",
+        "n": str(n),
+        "steps": steps,
+        "time_ms": time_used_ms
+    }
