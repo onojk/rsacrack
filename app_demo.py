@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #!/usr/bin/env python3
 import os, json, random, time, multiprocessing as mp
 from collections import Counter
@@ -403,3 +404,22 @@ def _api_json_guard(fn):
         return fn()
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 400
+=======
+from rsacrack import factor_one, is_probable_prime
+
+@app.post("/factor")
+def _factor_inline():
+    from flask import request, jsonify
+    data = request.get_json(force=True) if request.is_json else request.form
+    n = int(data.get("n"))
+    time_ms = int(data.get("time_ms", 3000))
+    res = factor_one(n, time_ms=time_ms)
+    if not res:
+        return jsonify({"status":"timeout","n":str(n),"time_ms":time_ms})
+    return jsonify({
+        "status":"ok","n":str(n),"p":str(res.p),"q":str(res.q),
+        "method":res.method,"steps":res.steps,
+        "is_p_prime": is_probable_prime(res.p),
+        "is_q_prime": is_probable_prime(res.q)
+    })
+>>>>>>> 71a6650 (chore: repo init + API + infra)

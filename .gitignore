@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 *.bak
 __pycache__/
 *.pyc
@@ -22,3 +23,26 @@ gunicorn.out
 gunicorn.err
 gunicorn.out.log
 gunicorn.err.log
+=======
+# venv & caches
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+.pytest_cache/
+*.log
+# local state/output
+tmp/
+*.tmp
+*.swp
+.DS_Store
+# build artifacts
+build/
+dist/
+*.egg-info/
+# editor
+.vscode/
+.idea/
+>>>>>>> 71a6650 (chore: repo init + API + infra)
