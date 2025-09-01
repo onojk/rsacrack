@@ -34,20 +34,16 @@ def _trial(n:int):
             return p if n!=p else None
     return None
 
-def _now_ms():
-    return int(time.time()*1000)
+def _now_ms(): return int(time.time()*1000)
 
 def factor_smart(n:int, max_ms:int=3000)->dict|None:
     """
     Returns dict: {p,q,method,steps} or None on timeout/exhaustion.
-    CPU-only ladder: trial -> short Fermat -> P-1 -> P+1 -> ECM tiers, staying within max_ms.
+    CPU-only ladder: trial -> short Fermat -> P-1 -> P+1 -> ECM tiers, within max_ms.
     """
-    start_ms=_now_ms()
-    def time_left():
-        return max(0, max_ms - (_now_ms()-start_ms))
-    def budget_s(seconds:float)->float:
-        # clamp by remaining time
-        return max(0.0, min(seconds, time_left()/1000.0))
+    start=_now_ms()
+    def left_ms(): return max(0, max_ms - (_now_ms()-start))
+    def budget(sec:float)->float: return max(0.0, min(sec, left_ms()/1000.0))
 
     steps=[]
     n=int(n)
@@ -61,50 +57,44 @@ def factor_smart(n:int, max_ms:int=3000)->dict|None:
         q=n//p
         return {"p":int(p), "q":int(q), "method":"trial", "steps":["trial division hit"]}
 
-    # 1) quick Fermat for near-square (try a few hundred deltas)
+    # 1) quick Fermat (try a few hundred deltas for near-square)
     a = math.isqrt(n)
     if a*a<n: a+=1
-    limit = 256
-    for i in range(limit):
+    for i in range(256):
         b2 = a*a - n
         if b2>=0:
             b = math.isqrt(b2)
             if b*b==b2:
-                p = a-b
-                q = a+b
+                p = a-b; q = a+b
                 if 1<p<n and n%p==0:
                     return {"p":int(p), "q":int(q), "method":"fermat", "steps":[f"Fermat hit at i={i}"]}
         a += 1
-        if time_left() <= 0:
-            return None
+        if left_ms() <= 0: return None
 
-    # 2) P-1 small/medium bounds
-    for (B1,B2,sec) in [(1000, 100000, 0.5), (10000, 1000000, 1.0)]:
-        hit = pm1_try(n, B1, B2, timeout_s=budget_s(sec))
+    # 2) P-1 sweeps
+    for (B1,B2,sec) in [(2000, 200000, 0.6), (20000, 1000000, 1.0)]:
+        hit = pm1_try(n, B1, B2, timeout_s=budget(sec))
         if hit and hit.p:
             p=hit.p; q=n//p
             return {"p":int(p), "q":int(q), "method":"p-1", "steps":steps+[hit.detail]}
 
-    # 3) P+1 small/medium bounds
-    for (B1,B2,sec) in [(2000, 200000, 0.5), (20000, 1000000, 1.0)]:
-        hit = pp1_try(n, B1, B2, timeout_s=budget_s(sec))
+    # 3) P+1 sweeps
+    for (B1,B2,sec) in [(3000, 300000, 0.6), (30000, 2000000, 1.0)]:
+        hit = pp1_try(n, B1, B2, timeout_s=budget(sec))
         if hit and hit.p:
             p=hit.p; q=n//p
             return {"p":int(p), "q":int(q), "method":"p+1", "steps":steps+[hit.detail]}
 
-    # 4) ECM tiers (1–few curves within remaining budget)
+    # 4) ECM tiers (few curves, increasing bounds)
     for (B1,B2,curves,sec) in [
-        (5000,   500000,   2, 1.0),
-        (50000,  5000000,  2, 1.5),
-        (250000, 20000000, 1, 2.0),
+        (5000,   500000,   2, 0.8),
+        (50000,  5000000,  2, 1.2),
+        (250000, 20000000, 1, 1.6),
     ]:
-        hit = ecm_try(n, B1, B2, curves=curves, timeout_s=budget_s(sec))
+        hit = ecm_try(n, B1, B2, curves=curves, timeout_s=budget(sec))
         if hit and hit.p:
             p=hit.p; q=n//p
             return {"p":int(p), "q":int(q), "method":"ecm", "steps":steps+[hit.detail]}
+        if left_ms() <= 0: return None
 
-        if time_left() <= 0:
-            return None
-
-    # Exhausted budget
     return None

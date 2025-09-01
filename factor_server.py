@@ -9,7 +9,10 @@ app = Flask(__name__)
 def factor_endpoint():
     t0 = time.time()
     data = request.get_json(force=True) if request.is_json else request.form
-    n = int(data.get("n"))
+    try:
+        n = int((data.get("n") or "").strip())
+    except Exception:
+        d = jsonify({"status":"error","error":"invalid n"}); d.status_code=400; return d
     time_ms = int(data.get("time_ms", 3000))
     res = factor_one(n, time_ms=time_ms)
     if not res:
