@@ -25,15 +25,15 @@ def _pick_factor(n:int, text:str)->int|None:
             f = int(m.group(1))
             if 1 < f < n and n % f == 0:
                 return f
-        except:
+        except Exception:
             pass
     return None
 
-def _needs_ecm():
-    return not ECM_BIN
+def _ecm_available() -> bool:
+    return bool(ECM_BIN)
 
 def ecm_try(n:int, B1:int, B2:int|None=None, curves:int=1, timeout_s:float=30.0)->FactorHit|None:
-    if _needs_ecm():
+    if not _ecm_available():
         return None
     args = [ECM_BIN, "-c", str(curves)]
     if B2: args += [str(B1), str(B2)]
@@ -44,7 +44,7 @@ def ecm_try(n:int, B1:int, B2:int|None=None, curves:int=1, timeout_s:float=30.0)
     return FactorHit("ecm", f, f"ECM B1={B1} B2={B2} c={curves}", ms) if f else None
 
 def pm1_try(n:int, B1:int, B2:int|None=None, timeout_s:float=10.0)->FactorHit|None:
-    if _needs_ecm():
+    if not _ecm_available():
         return None
     args = [ECM_BIN, "-pm1"]
     if B2: args += [str(B1), str(B2)]
@@ -55,7 +55,7 @@ def pm1_try(n:int, B1:int, B2:int|None=None, timeout_s:float=10.0)->FactorHit|No
     return FactorHit("p-1", f, f"P-1 B1={B1} B2={B2}", ms) if f else None
 
 def pp1_try(n:int, B1:int, B2:int|None=None, timeout_s:float=10.0)->FactorHit|None:
-    if _needs_ecm():
+    if not _ecm_available():
         return None
     args = [ECM_BIN, "-pp1"]
     if B2: args += [str(B1), str(B2)]
