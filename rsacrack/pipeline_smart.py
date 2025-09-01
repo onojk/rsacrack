@@ -65,7 +65,6 @@ def factor_smart(n:int, max_ms:int=3000)->dict|None:
         a+=1
         if (time.time()-t0)*1000>max_ms: return None
 
-    # helper
     def budget_ms(): return int((time.time()-t0)*1000)
 
     # 2) P-1 tiers
@@ -86,7 +85,7 @@ def factor_smart(n:int, max_ms:int=3000)->dict|None:
             p=hit.p; q=n//p
             return {"p":int(p), "q":int(q), "method":"p+1", "steps":steps+[hit.detail]}
 
-    # 4) ECM tiers (CPU-friendly)
+    # 4) ECM tiers
     ecm_tiers = [
         (50_000,    5_000_000,   30, 3.0),
         (250_000,  25_000_000,   60, 5.0),

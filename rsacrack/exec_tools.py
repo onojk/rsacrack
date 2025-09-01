@@ -30,9 +30,7 @@ def _pick_factor(n:int, text:str)->int|None:
     return None
 
 def _needs_ecm():
-    if not ECM_BIN:
-        return True
-    return False
+    return not ECM_BIN
 
 def ecm_try(n:int, B1:int, B2:int|None=None, curves:int=1, timeout_s:float=30.0)->FactorHit|None:
     if _needs_ecm():
