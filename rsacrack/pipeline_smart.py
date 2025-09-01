@@ -45,7 +45,6 @@ def factor_smart(n:int, max_ms:int=3000)->dict|None:
     def left_ms(): return max(0, max_ms - (_now_ms()-start))
     def budget(sec:float)->float: return max(0.0, min(sec, left_ms()/1000.0))
 
-    steps=[]
     n=int(n)
     if n<=1: return None
     if is_probable_prime(n):
@@ -57,7 +56,9 @@ def factor_smart(n:int, max_ms:int=3000)->dict|None:
         q=n//p
         return {"p":int(p), "q":int(q), "method":"trial", "steps":["trial division hit"]}
 
-    # 1) quick Fermat (try a few hundred deltas for near-square)
+    steps=[]
+
+    # 1) quick Fermat (few hundred deltas for near-square)
     a = math.isqrt(n)
     if a*a<n: a+=1
     for i in range(256):
