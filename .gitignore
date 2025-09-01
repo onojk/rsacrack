@@ -46,3 +46,6 @@ dist/
 .vscode/
 .idea/
 >>>>>>> 71a6650 (chore: repo init + API + infra)
+
+# local backups
+*.backup

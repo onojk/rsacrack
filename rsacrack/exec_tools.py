@@ -12,9 +12,9 @@ class FactorHit:
     detail: str
     elapsed_ms: int
 
-def _run(cmd:list[str], timeout:float)->tuple[int,str,str,int]:
+def _run_with_stdin(cmd:list[str], input_data:str, timeout:float)->tuple[int,str,str,int]:
     t0=time.time()
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    p = subprocess.run(cmd, input=input_data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                        text=True, timeout=timeout)
     ms = int((time.time()-t0)*1000)
     return p.returncode, p.stdout, p.stderr, ms
@@ -38,8 +38,7 @@ def ecm_try(n:int, B1:int, B2:int|None=None, curves:int=1, timeout_s:float=30.0)
     args = [ECM_BIN, "-c", str(curves)]
     if B2: args += [str(B1), str(B2)]
     else:  args += [str(B1)]
-    args += [str(n)]
-    rc, out, err, ms = _run(args, timeout_s)
+    rc, out, err, ms = _run_with_stdin(args, str(n), timeout_s)
     f = _pick_factor(n, out + "\n" + err)
     return FactorHit("ecm", f, f"ECM B1={B1} B2={B2} c={curves}", ms) if f else None
 
@@ -49,8 +48,7 @@ def pm1_try(n:int, B1:int, B2:int|None=None, timeout_s:float=10.0)->FactorHit|No
     args = [ECM_BIN, "-pm1"]
     if B2: args += [str(B1), str(B2)]
     else:  args += [str(B1)]
-    args += [str(n)]
-    rc, out, err, ms = _run(args, timeout_s)
+    rc, out, err, ms = _run_with_stdin(args, str(n), timeout_s)
     f = _pick_factor(n, out + "\n" + err)
     return FactorHit("p-1", f, f"P-1 B1={B1} B2={B2}", ms) if f else None
 
@@ -60,7 +58,6 @@ def pp1_try(n:int, B1:int, B2:int|None=None, timeout_s:float=10.0)->FactorHit|No
     args = [ECM_BIN, "-pp1"]
     if B2: args += [str(B1), str(B2)]
     else:  args += [str(B1)]
-    args += [str(n)]
-    rc, out, err, ms = _run(args, timeout_s)
+    rc, out, err, ms = _run_with_stdin(args, str(n), timeout_s)
     f = _pick_factor(n, out + "\n" + err)
     return FactorHit("p+1", f, f"P+1 B1={B1} B2={B2}", ms) if f else None
