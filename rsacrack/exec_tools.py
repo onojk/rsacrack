@@ -1,6 +1,7 @@
 from __future__ import annotations
 import shutil, subprocess, re, time, os, math
 import concurrent.futures
+import random
 from dataclasses import dataclass
 
 ECM_BIN = shutil.which("ecm")
@@ -73,25 +74,49 @@ def fermat_try(n: int, timeout_s: float = 10.0) -> int | None:
         x += 1
     return None
 
-# Pollard's Rho implementation (basic)
+# Improved Pollard's Rho implementation using Brent's algorithm
 def pollard_rho(n: int, timeout_s: float = 10.0) -> int | None:
     t0 = time.time()
     if n % 2 == 0:
         return 2
-    x = 2
-    y = 2
-    d = 1
-    f = lambda x: (x * x + 1) % n
-    while d == 1 and time.time() - t0 < timeout_s:
-        x = f(x)
-        y = f(f(y))
-        d = math.gcd(abs(x - y), n)
-    return d if d != n else None
+    
+    # Check for small factors first
+    for p in [3, 5, 7, 11, 13, 17, 19, 23, 29, 31]:
+        if n % p == 0:
+            return p
+    
+    # Brent's algorithm
+    y = random.randint(1, n-1)
+    c = random.randint(1, n-1)
+    m = random.randint(1, n-1)
+    g = r = q = 1
+    i = 0
+    
+    while g == 1 and time.time() - t0 < timeout_s:
+        x = y
+        for _ in range(r):
+            y = (y*y + c) % n
+        k = 0
+        while k < r and g == 1:
+            ys = y
+            for _ in range(min(m, r-k)):
+                y = (y*y + c) % n
+                q = (q * abs(x-y)) % n
+            g = math.gcd(q, n)
+            k += m
+        r *= 2
+    
+    if g == n:
+        while g == 1:
+            ys = (ys*ys + c) % n
+            g = math.gcd(abs(x-ys), n)
+    
+    return g if 1 < g < n else None
 
 def pollard_rho_try(n: int, timeout_s: float = 10.0) -> FactorHit | None:
     t0 = time.time()
     try:
-        f = pollard_rho(n, timeout=timeout_s)
+        f = pollard_rho(n, timeout_s=timeout_s)
     except TimeoutError:
         return None
     ms = int((time.time() - t0) * 1000)
